@@ -73,6 +73,14 @@ class LifeLinkViewModel(application: Application) : AndroidViewModel(application
     private val _isSimulationMode = MutableStateFlow(false)
     val isSimulationMode: StateFlow<Boolean> = _isSimulationMode.asStateFlow()
 
+    // Developer Mode (비밀 탭/설정 확인용)
+    private val _isDevMode = MutableStateFlow(false)
+    val isDevMode: StateFlow<Boolean> = _isDevMode.asStateFlow()
+
+    // Startup Initial Setup Completed State
+    private val _setupCompleted = MutableStateFlow(false)
+    val setupCompleted: StateFlow<Boolean> = _setupCompleted.asStateFlow()
+
     private var timerJob: Job? = null
     private var sensorMonitor: SensorMonitor? = null
     private val fusedLocationClient = LocationServices.getFusedLocationProviderClient(context)
@@ -98,6 +106,7 @@ class LifeLinkViewModel(application: Application) : AndroidViewModel(application
             _monitorHours.value = repository.getSetting(LifeLinkRepository.KEY_MONITOR_HOURS, "12").toIntOrNull() ?: 12
             _smsMode.value = repository.getSetting(LifeLinkRepository.KEY_SMS_MODE, "DIRECT")
             _isPremium.value = repository.getSetting(LifeLinkRepository.KEY_IS_PREMIUM, "false").toBoolean()
+            _setupCompleted.value = repository.getSetting(LifeLinkRepository.KEY_SETUP_COMPLETED, "false").toBoolean()
 
             resetTimer()
             startSensing()
@@ -438,6 +447,23 @@ class LifeLinkViewModel(application: Application) : AndroidViewModel(application
             _isPremium.value = nextValue
             repository.saveSetting(LifeLinkRepository.KEY_IS_PREMIUM, nextValue.toString())
             repository.insertLog("SETTINGS_CHANGED", if (nextValue) "안심 프리미엄 멤버십 가입을 확인했습니다." else "안심 프리미엄 멤버십 구독을 임시 취소했습니다.")
+        }
+    }
+
+    fun toggleDevMode() {
+        _isDevMode.value = !_isDevMode.value
+        viewModelScope.launch {
+            repository.insertLog("SYSTEM", "개발자 모드가 ${if (_isDevMode.value) "활성화" else "비활성화"}되었습니다.")
+        }
+    }
+
+    fun completeSetup(mode: String) {
+        _smsMode.value = mode
+        _setupCompleted.value = true
+        viewModelScope.launch {
+            repository.saveSetting(LifeLinkRepository.KEY_SMS_MODE, mode)
+            repository.saveSetting(LifeLinkRepository.KEY_SETUP_COMPLETED, "true")
+            repository.insertLog("SYSTEM", "초기 보호자 연동 및 안심 문자 발송 구격을 설정했습니다: ${if (mode == "DIRECT") "무제한 자동 발송" else "원터치 간편 연동"}")
         }
     }
 

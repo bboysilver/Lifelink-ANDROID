@@ -63,10 +63,17 @@ fun LifeLinkApp(viewModel: LifeLinkViewModel) {
     val locationPermission = rememberPermissionState(permission = Manifest.permission.ACCESS_FINE_LOCATION)
     val smsPermission = rememberPermissionState(permission = Manifest.permission.SEND_SMS)
 
-    LaunchedEffect(Unit) {
-        postNotificationsPermission?.launchPermissionRequest()
-        locationPermission.launchPermissionRequest()
-        smsPermission.launchPermissionRequest()
+    val setupCompleted by viewModel.setupCompleted.collectAsState()
+    val smsMode by viewModel.smsMode.collectAsState()
+
+    LaunchedEffect(setupCompleted, smsMode) {
+        if (setupCompleted) {
+            postNotificationsPermission?.launchPermissionRequest()
+            locationPermission.launchPermissionRequest()
+            if (smsMode == "DIRECT") {
+                smsPermission.launchPermissionRequest()
+            }
+        }
     }
 
     // Collect variables from state
@@ -78,6 +85,14 @@ fun LifeLinkApp(viewModel: LifeLinkViewModel) {
     if (alertState == 1) {
         PreAlertDialog(
             onDismiss = { viewModel.reportSurvival("1단계 화면 경고수용 및 해제") }
+        )
+    }
+
+    if (!setupCompleted) {
+        StartupSetupDialog(
+            onComplete = { mode ->
+                viewModel.completeSetup(mode)
+            }
         )
     }
 
@@ -142,6 +157,10 @@ fun DashboardTab(viewModel: LifeLinkViewModel) {
     val sensorPulse by viewModel.sensorPulse.collectAsState()
     val isSimulationMode by viewModel.isSimulationMode.collectAsState()
     val isMonitoring by viewModel.isMonitoring.collectAsState()
+    val isDevMode by viewModel.isDevMode.collectAsState()
+
+    val context = LocalContext.current
+    var titleTapCount by remember { mutableStateOf(0) }
 
     // Dynamic Pulsing scaling animator for pulse activity
     val infiniteTransition = rememberInfiniteTransition(label = "pulse")
@@ -178,7 +197,21 @@ fun DashboardTab(viewModel: LifeLinkViewModel) {
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.SpaceBetween
         ) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.clickable {
+                    titleTapCount++
+                    if (titleTapCount >= 5) {
+                        titleTapCount = 0
+                        viewModel.toggleDevMode()
+                        android.widget.Toast.makeText(
+                            context,
+                            if (!isDevMode) "개발자 설정이 활성화되었습니다!" else "개발자 설정이 해제되었습니다.",
+                            android.widget.Toast.LENGTH_SHORT
+                        ).show()
+                    }
+                }
+            ) {
                 Icon(
                     imageVector = Icons.Default.Favorite,
                     contentDescription = "Logo",
@@ -192,6 +225,22 @@ fun DashboardTab(viewModel: LifeLinkViewModel) {
                     fontWeight = FontWeight.Black,
                     color = MaterialTheme.colorScheme.onSurface
                 )
+                if (isDevMode) {
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(4.dp))
+                            .background(MaterialTheme.colorScheme.errorContainer)
+                            .padding(horizontal = 6.dp, vertical = 2.dp)
+                    ) {
+                        Text(
+                            text = "DEV",
+                            fontSize = 9.sp,
+                            color = MaterialTheme.colorScheme.onErrorContainer,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                }
             }
             IconButton(
                 onClick = { viewModel.toggleMonitoring() },
@@ -707,6 +756,7 @@ fun LogsTab(viewModel: LifeLinkViewModel) {
     val eventLogs by viewModel.eventLogs.collectAsState()
     val smsMode by viewModel.smsMode.collectAsState()
     val isPremium by viewModel.isPremium.collectAsState()
+    val isDevMode by viewModel.isDevMode.collectAsState()
 
     var showIosArchitectureDetail by remember { mutableStateOf(false) }
 
@@ -716,7 +766,269 @@ fun LogsTab(viewModel: LifeLinkViewModel) {
             .padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
-        // SaaS Angel Sponsorship & Goodwill Center (Monetization Hub)
+        // SMS Gateway Setup Header Option
+        item {
+            if (isDevMode) {
+                Card(
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
+                    shape = RoundedCornerShape(16.dp),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column(modifier = Modifier.padding(16.dp)) {
+                        Text(
+                            text = "안심 SOS 문자 발송 규격 [개발자 모드]",
+                            fontSize = 17.sp,
+                            fontWeight = FontWeight.Black
+                        )
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text(
+                            text = "구글 플레이 스토어 정책 준수를 위해 아래 전송 모드 중 하나를 선택해 기동하십시오.",
+                            fontSize = 12.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        Spacer(modifier = Modifier.height(12.dp))
+
+                        // 4-way SMS Engine Selector Grid Rows
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            val firstRowModes = listOf(
+                                Triple("PREMIUM", "프리미엄 클라우드", Icons.Default.Verified),
+                                Triple("INTENT", "스토어 수동 연동", Icons.Default.Smartphone)
+                            )
+                            firstRowModes.forEach { (mode, label, icon) ->
+                                val isSelected = smsMode == mode
+                                Box(
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .height(58.dp)
+                                        .clip(RoundedCornerShape(10.dp))
+                                        .background(
+                                            if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surface
+                                        )
+                                        .clickable { viewModel.updateSmsMode(mode) }
+                                        .padding(4.dp),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                        Icon(
+                                            imageVector = icon,
+                                            contentDescription = label,
+                                            tint = if (isSelected) Color.White else MaterialTheme.colorScheme.onSurface,
+                                            modifier = Modifier.size(16.dp)
+                                        )
+                                        Spacer(modifier = Modifier.height(2.dp))
+                                        Text(
+                                            text = label,
+                                            fontSize = 11.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            color = if (isSelected) Color.White else MaterialTheme.colorScheme.onSurface
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                        
+                        Spacer(modifier = Modifier.height(6.dp))
+                        
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            val secondRowModes = listOf(
+                                Triple("VIRTUAL", "가상 모의 전송", Icons.Default.PhonelinkSetup),
+                                Triple("DIRECT", "로컬 백그라운드", Icons.AutoMirrored.Filled.Send)
+                            )
+                            secondRowModes.forEach { (mode, label, icon) ->
+                                val isSelected = smsMode == mode
+                                Box(
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .height(58.dp)
+                                        .clip(RoundedCornerShape(10.dp))
+                                        .background(
+                                            if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surface
+                                        )
+                                        .clickable { viewModel.updateSmsMode(mode) }
+                                        .padding(4.dp),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                        Icon(
+                                            imageVector = icon,
+                                            contentDescription = label,
+                                            tint = if (isSelected) Color.White else MaterialTheme.colorScheme.onSurface,
+                                            modifier = Modifier.size(16.dp)
+                                        )
+                                        Spacer(modifier = Modifier.height(2.dp))
+                                        Text(
+                                            text = label,
+                                            fontSize = 11.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            color = if (isSelected) Color.White else MaterialTheme.colorScheme.onSurface
+                                        )
+                                    }
+                                }
+                            }
+                        }
+
+                        Spacer(modifier = Modifier.height(14.dp))
+
+                        Text(
+                            text = when (smsMode) {
+                                "PREMIUM" -> "✅ [추천 - 구글 플레이 완벽 대응] 라이프링크 통합 클라우드를 거쳐 동작 정지 상황 감지 시 100% 무인 백그라운드 자동 알림을 전개합니다. 클라이언트에 SEND_SMS 권한 요구가 없어 플레이 스토어 무검수 즉각 통과 대상입니다."
+                                "INTENT" -> "✅ [허용 - 구글 플레이 완벽 준수] 움직임 감지 부재 시 스마트폰 기본 문자 앱(Messages)에 수신처 보호자 번호와 조립된 SOS 위급 링크를 사전 주입한 채 열어드립니다. 원터치 발송으로 Play Store 규격에 100% 합치합니다."
+                                "VIRTUAL" -> "✅ [추천 - 시뮬레이션 전용] 실제 통신 비용이나 SMS 권한 요청 없이, 타임라인 역사 기록에만 구동 긴급 전송 로그가 연계되어 기록되는 완전 안전 모의 훈련 규격입니다."
+                                "DIRECT" -> "⚠️ [주의 - 구글 플레이 심사 반려] 단말의 직접 백그라운드 무인 SMS 전송(SmsManager)을 개시하여 발송합니다. 구글 플레이 스토어 출시 시 99% 즉각 승인 거절되므로 사설용/소형 자가 배포판으로 활용되는 규격입니다."
+                                else -> "• 위기상황 발생 시 스마트폰 시스템 기본 메시지 앱에 연결해 드리는 연동 브릿지입니다."
+                            },
+                            fontSize = 12.sp,
+                            color = when (smsMode) {
+                                "DIRECT" -> MaterialTheme.colorScheme.error
+                                else -> MaterialTheme.colorScheme.onSurfaceVariant
+                            },
+                            fontWeight = FontWeight.Bold,
+                            lineHeight = 17.sp
+                        )
+                    }
+                }
+            } else {
+                Card(
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
+                    shape = RoundedCornerShape(16.dp),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column(modifier = Modifier.padding(16.dp)) {
+                        Text(
+                            text = "안심 SOS 문자 발송 방식",
+                            fontSize = 17.sp,
+                            fontWeight = FontWeight.Black
+                        )
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text(
+                            text = "위급상황 시 보호자에게 구조 알림 문자를 전송할 방식을 안전하게 선택할 수 있습니다.",
+                            fontSize = 12.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        Spacer(modifier = Modifier.height(14.dp))
+
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            val seniorModes = listOf(
+                                Triple("DIRECT", "무제한 자동 발송", Icons.Default.FlashOn),
+                                Triple("INTENT", "원터치 간편 연동", Icons.Default.TouchApp)
+                            )
+                            seniorModes.forEach { (mode, label, icon) ->
+                                val isSelected = if (smsMode == "DIRECT") mode == "DIRECT" else mode == "INTENT"
+                                Box(
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .height(64.dp)
+                                        .clip(RoundedCornerShape(12.dp))
+                                        .background(
+                                            if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surface
+                                        )
+                                        .clickable { viewModel.updateSmsMode(mode) }
+                                        .padding(4.dp),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                        Icon(
+                                            imageVector = icon,
+                                            contentDescription = label,
+                                            tint = if (isSelected) Color.White else MaterialTheme.colorScheme.onSurface,
+                                            modifier = Modifier.size(18.dp)
+                                        )
+                                        Spacer(modifier = Modifier.height(4.dp))
+                                        Text(
+                                            text = label,
+                                            fontSize = 12.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            color = if (isSelected) Color.White else MaterialTheme.colorScheme.onSurface
+                                        )
+                                    }
+                                }
+                            }
+                        }
+
+                        Spacer(modifier = Modifier.height(14.dp))
+
+                        Text(
+                            text = if (smsMode == "DIRECT") {
+                                "💡 [현재 무제한 자동 발송]: 위급 상황 감지 시 보호자에게 비상 알림 문자가 자동으로 즉시 발송됩니다."
+                            } else {
+                                "💡 [현재 원터치 간편 연동]: 위급 상황 감지 시 문자를 즉시 보낼 수 있도록 스마트폰 메시지 창을 띄워드립니다."
+                            },
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+            }
+        }
+
+        // Cross-platform iOS Launch Engineering Architecture Card (Show only if developer mode is enabled!)
+        if (isDevMode) {
+            item {
+                Card(
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)),
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.onSurface.copy(alpha = 0.1f)),
+                    shape = RoundedCornerShape(16.dp),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column(modifier = Modifier.padding(16.dp)) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Icon(
+                                    imageVector = Icons.Default.Build,
+                                    contentDescription = "iOS Icon",
+                                    tint = MaterialTheme.colorScheme.secondary,
+                                    modifier = Modifier.size(20.dp)
+                                )
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text(
+                                    text = "iOS 원클릭 출시 및 KMP 기술 이식도",
+                                    fontSize = 14.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = MaterialTheme.colorScheme.onSurface
+                                )
+                            }
+                            TextButton(onClick = { showIosArchitectureDetail = !showIosArchitectureDetail }) {
+                                Text(if (showIosArchitectureDetail) "접기" else "자세히 보기", fontSize = 12.sp)
+                            }
+                        }
+
+                        if (showIosArchitectureDetail) {
+                            Spacer(modifier = Modifier.height(10.dp))
+                            HorizontalDivider()
+                            Spacer(modifier = Modifier.height(8.dp))
+                            Text(
+                                text = "💡 라이프링크 크로스플랫폼 (iOS/Android) 런칭 설계:\n\n" +
+                                        "1. 비즈니스 로직 분리 (Kotlin Multiplatform):\n" +
+                                        "본 앱은 Clean Architecture를 준수하여, UI와 단말 센서 감지기 외의 팩 카운트 타이머(Timer logic), 이벤트 역사 데이터베이스 구조(Room Database), 안심 공용 SaaS 클라우드 HTTP API 통신망은 'Kotlin Multiplatform Shared Module'로 묶어 iOS 상에서 100% 그대로 재사용할 수 있도록 선제 분할되었습니다.\n\n" +
+                                        "2. iOS 전용 Background Activity 및 CoreMotion 통합:\n" +
+                                        "iOS의 백그라운드 환경 특성상 Background Tasks를 스케줄링하고 CoreMotion 센서 락 인터페이스를 구현해, Android의 'SensorMonitor' 디스크립터에 해당하는 부분만 Swift Native API로 정밀 치환함으로써 앱 전체 코드의 80%를 공용 생산할 수 있습니다.\n\n" +
+                                        "3. iOS 클라우드 알림 연동:\n" +
+                                        "동작 미감지 긴급 구조 발생 시, 디바이스의 무인 통신망 제어가 엄격한 Apple iOS 생태계 하에서도 본 프리미엄 클라우드 API를 사용하기에 어떠한 로컬 문자 거절 사유 없이 순수 서버리스 API 트리거로 SMS 통보가 정상 송출됩니다.",
+                                fontSize = 12.sp,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                lineHeight = 18.sp
+                            )
+                        }
+                    }
+                }
+            }
+        }
+
+        // SaaS Angel Sponsorship & Goodwill Center (Monetization Hub) (Moved down!)
         item {
             Card(
                 colors = CardDefaults.cardColors(
@@ -787,189 +1099,6 @@ fun LogsTab(viewModel: LifeLinkViewModel) {
                             text = if (isPremium) "정기 후원 및 광고 제거 종료 (일반 버전 전환)" else "엔젤 정기 후원 가입 시뮬레이션하기 (월 1,900원)",
                             fontSize = 13.sp,
                             fontWeight = FontWeight.Bold
-                        )
-                    }
-                }
-            }
-        }
-
-        // SMS Gateway Setup Header Option
-        item {
-            Card(
-                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
-                shape = RoundedCornerShape(16.dp),
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Column(modifier = Modifier.padding(16.dp)) {
-                    Text(
-                        text = "안심 SOS 문자 발송 규격",
-                        fontSize = 17.sp,
-                        fontWeight = FontWeight.Black
-                    )
-                    Spacer(modifier = Modifier.height(4.dp))
-                    Text(
-                        text = "구글 플레이 스토어 정책 준수를 위해 아래 전송 모드 중 하나를 선택해 기동하십시오.",
-                        fontSize = 12.sp,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                    Spacer(modifier = Modifier.height(12.dp))
-
-                    // 4-way SMS Engine Selector Grid Rows
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(6.dp)
-                    ) {
-                        val firstRowModes = listOf(
-                            Triple("PREMIUM", "프리미엄 클라우드", Icons.Default.Verified),
-                            Triple("INTENT", "스토어 수동 연동", Icons.Default.Smartphone)
-                        )
-                        firstRowModes.forEach { (mode, label, icon) ->
-                            val isSelected = smsMode == mode
-                            Box(
-                                modifier = Modifier
-                                    .weight(1f)
-                                    .height(58.dp)
-                                    .clip(RoundedCornerShape(10.dp))
-                                    .background(
-                                        if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surface
-                                    )
-                                    .clickable { viewModel.updateSmsMode(mode) }
-                                    .padding(4.dp),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                    Icon(
-                                        imageVector = icon,
-                                        contentDescription = label,
-                                        tint = if (isSelected) Color.White else MaterialTheme.colorScheme.onSurface,
-                                        modifier = Modifier.size(16.dp)
-                                    )
-                                    Spacer(modifier = Modifier.height(2.dp))
-                                    Text(
-                                        text = label,
-                                        fontSize = 11.sp,
-                                        fontWeight = FontWeight.Bold,
-                                        color = if (isSelected) Color.White else MaterialTheme.colorScheme.onSurface
-                                    )
-                                }
-                            }
-                        }
-                    }
-                    
-                    Spacer(modifier = Modifier.height(6.dp))
-                    
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(6.dp)
-                    ) {
-                        val secondRowModes = listOf(
-                            Triple("VIRTUAL", "가상 모의 전송", Icons.Default.PhonelinkSetup),
-                            Triple("DIRECT", "로컬 백그라운드", Icons.AutoMirrored.Filled.Send)
-                        )
-                        secondRowModes.forEach { (mode, label, icon) ->
-                            val isSelected = smsMode == mode
-                            Box(
-                                modifier = Modifier
-                                    .weight(1f)
-                                    .height(58.dp)
-                                    .clip(RoundedCornerShape(10.dp))
-                                    .background(
-                                        if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surface
-                                    )
-                                    .clickable { viewModel.updateSmsMode(mode) }
-                                    .padding(4.dp),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                    Icon(
-                                        imageVector = icon,
-                                        contentDescription = label,
-                                        tint = if (isSelected) Color.White else MaterialTheme.colorScheme.onSurface,
-                                        modifier = Modifier.size(16.dp)
-                                    )
-                                    Spacer(modifier = Modifier.height(2.dp))
-                                    Text(
-                                        text = label,
-                                        fontSize = 11.sp,
-                                        fontWeight = FontWeight.Bold,
-                                        color = if (isSelected) Color.White else MaterialTheme.colorScheme.onSurface
-                                    )
-                                }
-                            }
-                        }
-                    }
-
-                    Spacer(modifier = Modifier.height(14.dp))
-
-                    Text(
-                        text = when (smsMode) {
-                            "PREMIUM" -> "✅ [추천 - 구글 플레이 완벽 대응] 라이프링크 통합 클라우드를 거쳐 동작 정지 상황 감지 시 100% 무인 백그라운드 자동 알림을 전개합니다. 클라이언트에 SEND_SMS 권한 요구가 없어 플레이 스토어 무검수 즉각 통과 대상입니다."
-                            "INTENT" -> "✅ [허용 - 구글 플레이 완벽 준수] 움직임 감지 부재 시 스마트폰 기본 문자 앱(Messages)에 수신처 보호자 번호와 조립된 SOS 위급 링크를 사전 주입한 채 열어드립니다. 원터치 발송으로 Play Store 규격에 100% 합치합니다."
-                            "VIRTUAL" -> "✅ [추천 - 시뮬레이션 전용] 실제 통신 비용이나 SMS 권한 요청 없이, 타임라인 역사 기록에만 구동 긴급 전송 로그가 연계되어 기록되는 완전 안전 모의 훈련 규격입니다."
-                            "DIRECT" -> "⚠️ [주의 - 구글 플레이 심사 반려] 단말의 직접 백그라운드 무인 SMS 전송(SmsManager)을 개시하여 발송합니다. 구글 플레이 스토어 출시 시 99% 즉각 승인 거절되므로 사설용/소형 자가 배포판으로 활용되는 규격입니다."
-                            else -> "• 위기상황 발생 시 스마트폰 시스템 기본 메시지 앱에 연결해 드리는 연동 브릿지입니다."
-                        },
-                        fontSize = 12.sp,
-                        color = when (smsMode) {
-                            "DIRECT" -> MaterialTheme.colorScheme.error
-                            else -> MaterialTheme.colorScheme.onSurfaceVariant
-                        },
-                        fontWeight = FontWeight.Bold,
-                        lineHeight = 17.sp
-                    )
-                }
-            }
-        }
-
-        // Cross-platform iOS Launch Engineering Architecture Card
-        item {
-            Card(
-                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)),
-                border = BorderStroke(1.dp, MaterialTheme.colorScheme.onSurface.copy(alpha = 0.1f)),
-                shape = RoundedCornerShape(16.dp),
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Column(modifier = Modifier.padding(16.dp)) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Icon(
-                                imageVector = Icons.Default.Build,
-                                contentDescription = "iOS Icon",
-                                tint = MaterialTheme.colorScheme.secondary,
-                                modifier = Modifier.size(20.dp)
-                            )
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Text(
-                                text = "iOS 원클릭 출시 및 KMP 기술 이식도",
-                                fontSize = 14.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = MaterialTheme.colorScheme.onSurface
-                            )
-                        }
-                        TextButton(onClick = { showIosArchitectureDetail = !showIosArchitectureDetail }) {
-                            Text(if (showIosArchitectureDetail) "접기" else "자세히 보기", fontSize = 12.sp)
-                        }
-                    }
-
-                    if (showIosArchitectureDetail) {
-                        Spacer(modifier = Modifier.height(10.dp))
-                        HorizontalDivider()
-                        Spacer(modifier = Modifier.height(8.dp))
-                        Text(
-                            text = "💡 라이프링크 크로스플랫폼 (iOS/Android) 런칭 설계:\n\n" +
-                                    "1. 비즈니스 로직 분리 (Kotlin Multiplatform):\n" +
-                                    "본 앱은 Clean Architecture를 준수하여, UI와 단말 센서 감지기 외의 팩 카운트 타이머(Timer logic), 이벤트 역사 데이터베이스 구조(Room Database), 안심 공용 SaaS 클라우드 HTTP API 통신망은 'Kotlin Multiplatform Shared Module'로 묶어 iOS 상에서 100% 그대로 재사용할 수 있도록 선제 분할되었습니다.\n\n" +
-                                    "2. iOS 전용 Background Activity 및 CoreMotion 통합:\n" +
-                                    "iOS의 백그라운드 환경 특성상 Background Tasks를 스케줄링하고 CoreMotion 센서 락 인터페이스를 구현해, Android의 'SensorMonitor' 디스크립터에 해당하는 부분만 Swift Native API로 정밀 치환함으로써 앱 전체 코드의 80%를 공용 생산할 수 있습니다.\n\n" +
-                                    "3. iOS 클라우드 알림 연동:\n" +
-                                    "동작 미감지 긴급 구조 발생 시, 디바이스의 무인 통신망 제어가 엄격한 Apple iOS 생태계 하에서도 본 프리미엄 클라우드 API를 사용하기에 어떠한 로컬 문자 거절 사유 없이 순수 서버리스 API 트리거로 SMS 통보가 정상 송출됩니다.",
-                            fontSize = 12.sp,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            lineHeight = 18.sp
                         )
                     }
                 }
@@ -1280,4 +1409,180 @@ fun SimulatedAdBanner() {
         }
     }
 }
+
+@Composable
+fun StartupSetupDialog(onComplete: (String) -> Unit) {
+    var selectedMode by remember { mutableStateOf("DIRECT") }
+
+    Dialog(onDismissRequest = { /* Force selection to complete initialization */ }) {
+        Card(
+            shape = RoundedCornerShape(28.dp),
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+            elevation = CardDefaults.cardElevation(defaultElevation = 12.dp),
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp)
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(24.dp),
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(64.dp)
+                        .background(MaterialTheme.colorScheme.primaryContainer, CircleShape),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Favorite,
+                        contentDescription = "LifeLink Logo",
+                        tint = Color(0xFFE91E63),
+                        modifier = Modifier.size(36.dp)
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(18.dp))
+
+                Text(
+                    text = "라이프링크 시작하기",
+                    fontSize = 24.sp,
+                    fontWeight = FontWeight.Black,
+                    color = MaterialTheme.colorScheme.onSurface,
+                    textAlign = TextAlign.Center
+                )
+
+                Spacer(modifier = Modifier.height(8.dp))
+
+                Text(
+                    text = "어르신의 동작을 실시간 검지하여 위급 발생 시 비상 보호자에게 SOS 안심 통보를 구동합니다.",
+                    fontSize = 13.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    textAlign = TextAlign.Center,
+                    lineHeight = 18.sp
+                )
+
+                Spacer(modifier = Modifier.height(20.dp))
+                HorizontalDivider()
+                Spacer(modifier = Modifier.height(20.dp))
+
+                Text(
+                    text = "안심 알림 문자 전송 방식 선택",
+                    fontSize = 15.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.onSurface,
+                    modifier = Modifier.align(Alignment.Start)
+                )
+
+                Spacer(modifier = Modifier.height(12.dp))
+
+                // DIRECT MODE Option Card
+                Card(
+                    shape = RoundedCornerShape(12.dp),
+                    colors = CardDefaults.cardColors(
+                        containerColor = if (selectedMode == "DIRECT") MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
+                    ),
+                    border = BorderStroke(
+                        width = 2.dp,
+                        color = if (selectedMode == "DIRECT") MaterialTheme.colorScheme.primary else Color.Transparent
+                    ),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable { selectedMode = "DIRECT" }
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(16.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        RadioButton(
+                            selected = selectedMode == "DIRECT",
+                            onClick = { selectedMode = "DIRECT" }
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Column {
+                            Text(
+                                text = "🚀 무제한 자동 발송",
+                                fontSize = 15.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                            Spacer(modifier = Modifier.height(2.dp))
+                            Text(
+                                text = "동작 미감지 시, 보호자 번호로 비상 상황 알림 문자가 완전히 자동으로 자동 송출됩니다.",
+                                fontSize = 12.sp,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                lineHeight = 16.sp
+                            )
+                        }
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(10.dp))
+
+                // INTENT MODE Option Card
+                Card(
+                    shape = RoundedCornerShape(12.dp),
+                    colors = CardDefaults.cardColors(
+                        containerColor = if (selectedMode == "INTENT") MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
+                    ),
+                    border = BorderStroke(
+                        width = 2.dp,
+                        color = if (selectedMode == "INTENT") MaterialTheme.colorScheme.primary else Color.Transparent
+                    ),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable { selectedMode = "INTENT" }
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(16.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        RadioButton(
+                            selected = selectedMode == "INTENT",
+                            onClick = { selectedMode = "INTENT" }
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Column {
+                            Text(
+                                text = "📱 원터치 간편 연동",
+                                fontSize = 15.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                            Spacer(modifier = Modifier.height(2.dp))
+                            Text(
+                                text = "스마트폰 기본 메시지 창을 자동으로 열어, 원터치 터치 한 번으로 안전하게 문자가 전송됩니다.",
+                                fontSize = 12.sp,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                lineHeight = 16.sp
+                            )
+                        }
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(24.dp))
+
+                Button(
+                    onClick = { onComplete(selectedMode) },
+                    shape = RoundedCornerShape(14.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(54.dp)
+                ) {
+                    Text(
+                        text = "설정 완료하고 시작하기",
+                        fontSize = 16.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+            }
+        }
+    }
+}
+
 

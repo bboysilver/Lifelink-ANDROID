@@ -14,6 +14,7 @@ class LifeLinkRepository(private val db: AppDatabase) {
         const val KEY_MONITOR_HOURS = "monitor_hours"
         const val KEY_SMS_MODE = "sms_mode" // "VIRTUAL", "INTENT", "DIRECT", "PREMIUM"
         const val KEY_IS_PREMIUM = "is_premium"
+        const val KEY_SETUP_COMPLETED = "setup_completed"
     }
 
     // Settings
