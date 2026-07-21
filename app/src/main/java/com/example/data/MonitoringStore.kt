@@ -3,14 +3,23 @@ package com.example.data
 import android.content.Context
 import kotlin.math.max
 
+enum class MonitoringRuntimeState { STARTING, RUNNING, ERROR, STOPPED }
+
 data class MonitoringSnapshot(
-    val enabled: Boolean,
+    val desiredEnabled: Boolean,
+    val runtimeState: MonitoringRuntimeState,
+    val serviceError: String,
     val deadlineMs: Long,
     val remainingSeconds: Long,
     val alertState: Int,
     val lastActivityMs: Long,
-    val lastActivityReason: String
-)
+    val lastActivityReason: String,
+    val lastHeartbeatMs: Long,
+    val deviceAlias: String
+) {
+    val isRunning: Boolean
+        get() = runtimeState == MonitoringRuntimeState.RUNNING
+}
 
 object DeadlineCalculator {
     const val PRE_ALERT_SECONDS = 30 * 60L
@@ -29,8 +38,22 @@ class MonitoringStore(context: Context) {
         get() = preferences.getInt(KEY_MONITOR_HOURS, 12).coerceIn(6, 72)
         set(value) = preferences.edit().putInt(KEY_MONITOR_HOURS, value.coerceIn(6, 72)).apply()
 
-    val isEnabled: Boolean
-        get() = preferences.getBoolean(KEY_ENABLED, false)
+    var deviceAlias: String
+        get() = preferences.getString(KEY_DEVICE_ALIAS, DEFAULT_DEVICE_ALIAS)
+            ?.trim()
+            ?.takeIf(String::isNotEmpty)
+            ?: DEFAULT_DEVICE_ALIAS
+        set(value) {
+            val normalized = value.trim().take(30).ifEmpty { DEFAULT_DEVICE_ALIAS }
+            preferences.edit().putString(KEY_DEVICE_ALIAS, normalized).apply()
+        }
+
+    val desiredEnabled: Boolean
+        get() = preferences.getBoolean(KEY_DESIRED_ENABLED, false)
+
+    var smsSubscriptionId: Int
+        get() = preferences.getInt(KEY_SMS_SUBSCRIPTION_ID, INVALID_SUBSCRIPTION_ID)
+        set(value) = preferences.edit().putInt(KEY_SMS_SUBSCRIPTION_ID, value).apply()
 
     val isSetupCompleted: Boolean
         get() = preferences.getBoolean(KEY_SETUP_COMPLETED, false)
@@ -42,22 +65,41 @@ class MonitoringStore(context: Context) {
         preferences.edit().putBoolean(KEY_SETUP_COMPLETED, true).apply()
     }
 
-    fun start(nowMs: Long = System.currentTimeMillis(), reason: String = "모니터링 시작") {
-        resetDeadline(nowMs, reason, enable = true)
+    fun setDesiredEnabled(enabled: Boolean) {
+        preferences.edit()
+            .putBoolean(KEY_DESIRED_ENABLED, enabled)
+            .putString(KEY_RUNTIME_STATE, MonitoringRuntimeState.STOPPED.name)
+            .putLong(KEY_STATE_UPDATED_MS, System.currentTimeMillis())
+            .apply()
     }
 
-    fun stop() {
-        preferences.edit().putBoolean(KEY_ENABLED, false).apply()
-    }
-
-    fun resetDeadline(
-        nowMs: Long = System.currentTimeMillis(),
-        reason: String,
-        enable: Boolean = isEnabled
-    ): Long {
+    fun beginStart(nowMs: Long = System.currentTimeMillis(), reason: String = "모니터링 시작") {
         val newDeadline = DeadlineCalculator.deadlineMs(nowMs, monitorHours)
         preferences.edit()
-            .putBoolean(KEY_ENABLED, enable)
+            .putBoolean(KEY_DESIRED_ENABLED, true)
+            .putString(KEY_RUNTIME_STATE, MonitoringRuntimeState.STARTING.name)
+            .putLong(KEY_STATE_UPDATED_MS, nowMs)
+            .putLong(KEY_LAST_HEARTBEAT_MS, 0L)
+            .putString(KEY_SERVICE_ERROR, "")
+            .putLong(KEY_LAST_ACTIVITY_MS, nowMs)
+            .putString(KEY_LAST_ACTIVITY_REASON, reason)
+            .putLong(KEY_DEADLINE_MS, newDeadline)
+            .apply()
+    }
+
+    fun stop(nowMs: Long = System.currentTimeMillis()) {
+        preferences.edit()
+            .putBoolean(KEY_DESIRED_ENABLED, false)
+            .putString(KEY_RUNTIME_STATE, MonitoringRuntimeState.STOPPED.name)
+            .putLong(KEY_STATE_UPDATED_MS, nowMs)
+            .putLong(KEY_LAST_HEARTBEAT_MS, 0L)
+            .putString(KEY_SERVICE_ERROR, "")
+            .apply()
+    }
+
+    fun resetDeadline(nowMs: Long = System.currentTimeMillis(), reason: String): Long {
+        val newDeadline = DeadlineCalculator.deadlineMs(nowMs, monitorHours)
+        preferences.edit()
             .putLong(KEY_LAST_ACTIVITY_MS, nowMs)
             .putString(KEY_LAST_ACTIVITY_REASON, reason)
             .putLong(KEY_DEADLINE_MS, newDeadline)
@@ -66,23 +108,43 @@ class MonitoringStore(context: Context) {
     }
 
     fun initializeDeadlineIfMissing(nowMs: Long = System.currentTimeMillis()) {
-        if (deadlineMs <= 0L) {
-            resetDeadline(nowMs, "초기 설정", enable = isEnabled)
-        }
+        if (desiredEnabled && deadlineMs <= 0L) resetDeadline(nowMs, "초기 설정")
     }
 
-    fun canAttemptEmergency(deadlineMs: Long, nowMs: Long = System.currentTimeMillis()): Boolean {
-        val attemptedDeadline = preferences.getLong(KEY_EMERGENCY_ATTEMPT_DEADLINE_MS, -1L)
-        val lastAttemptMs = preferences.getLong(KEY_EMERGENCY_ATTEMPT_MS, 0L)
-        return attemptedDeadline != deadlineMs || nowMs - lastAttemptMs >= EMERGENCY_RETRY_INTERVAL_MS
-    }
-
-    fun markEmergencyAttempt(deadlineMs: Long, nowMs: Long = System.currentTimeMillis()) {
+    fun markServiceStarting(nowMs: Long = System.currentTimeMillis()) {
         preferences.edit()
-            .putLong(KEY_EMERGENCY_ATTEMPT_DEADLINE_MS, deadlineMs)
-            .putLong(KEY_EMERGENCY_ATTEMPT_MS, nowMs)
+            .putString(KEY_RUNTIME_STATE, MonitoringRuntimeState.STARTING.name)
+            .putLong(KEY_STATE_UPDATED_MS, nowMs)
+            .putString(KEY_SERVICE_ERROR, "")
             .apply()
     }
+
+    fun markServiceRunning(nowMs: Long = System.currentTimeMillis()) {
+        preferences.edit()
+            .putString(KEY_RUNTIME_STATE, MonitoringRuntimeState.RUNNING.name)
+            .putLong(KEY_STATE_UPDATED_MS, nowMs)
+            .putLong(KEY_LAST_HEARTBEAT_MS, nowMs)
+            .putString(KEY_SERVICE_ERROR, "")
+            .apply()
+    }
+
+    fun markHeartbeat(nowMs: Long = System.currentTimeMillis()) {
+        if (!desiredEnabled) return
+        preferences.edit()
+            .putString(KEY_RUNTIME_STATE, MonitoringRuntimeState.RUNNING.name)
+            .putLong(KEY_LAST_HEARTBEAT_MS, nowMs)
+            .apply()
+    }
+
+    fun markServiceError(message: String, nowMs: Long = System.currentTimeMillis()) {
+        if (!desiredEnabled) return
+        preferences.edit()
+            .putString(KEY_RUNTIME_STATE, MonitoringRuntimeState.ERROR.name)
+            .putLong(KEY_STATE_UPDATED_MS, nowMs)
+            .putString(KEY_SERVICE_ERROR, message)
+            .apply()
+    }
+
     fun markPreAlert(deadlineMs: Long) {
         preferences.edit().putLong(KEY_PRE_ALERT_DEADLINE_MS, deadlineMs).apply()
     }
@@ -100,36 +162,68 @@ class MonitoringStore(context: Context) {
     fun snapshot(nowMs: Long = System.currentTimeMillis()): MonitoringSnapshot {
         val currentDeadline = deadlineMs
         val remaining = DeadlineCalculator.remainingSeconds(currentDeadline, nowMs)
-        val state = when {
-            !isEnabled -> 0
+        val heartbeatMs = preferences.getLong(KEY_LAST_HEARTBEAT_MS, 0L)
+        val stateUpdatedMs = preferences.getLong(KEY_STATE_UPDATED_MS, 0L)
+        val storedState = preferences.getString(KEY_RUNTIME_STATE, null)
+            ?.let { name -> MonitoringRuntimeState.entries.firstOrNull { it.name == name } }
+            ?: MonitoringRuntimeState.STOPPED
+        val runtimeState = when {
+            !desiredEnabled -> MonitoringRuntimeState.STOPPED
+            storedState == MonitoringRuntimeState.RUNNING &&
+                (heartbeatMs == 0L || nowMs - heartbeatMs > HEARTBEAT_TIMEOUT_MS) -> MonitoringRuntimeState.ERROR
+            storedState == MonitoringRuntimeState.STARTING &&
+                nowMs - stateUpdatedMs > START_TIMEOUT_MS -> MonitoringRuntimeState.ERROR
+            else -> storedState
+        }
+        val error = when {
+            runtimeState != MonitoringRuntimeState.ERROR -> ""
+            storedState == MonitoringRuntimeState.RUNNING -> "모니터링 서비스 응답이 중단되었습니다."
+            storedState == MonitoringRuntimeState.STARTING -> "모니터링 서비스를 시작하지 못했습니다."
+            else -> preferences.getString(KEY_SERVICE_ERROR, "모니터링이 중단되었습니다.")
+                ?: "모니터링이 중단되었습니다."
+        }
+        val alertState = when {
+            !desiredEnabled -> 0
             currentDeadline <= 0L -> 0
             wasEmergencyDispatched(currentDeadline) || remaining == 0L -> 2
             wasPreAlerted(currentDeadline) || remaining <= DeadlineCalculator.PRE_ALERT_SECONDS -> 1
             else -> 0
         }
         return MonitoringSnapshot(
-            enabled = isEnabled,
+            desiredEnabled = desiredEnabled,
+            runtimeState = runtimeState,
+            serviceError = error,
             deadlineMs = currentDeadline,
             remainingSeconds = remaining,
-            alertState = state,
+            alertState = alertState,
             lastActivityMs = preferences.getLong(KEY_LAST_ACTIVITY_MS, 0L),
             lastActivityReason = preferences.getString(KEY_LAST_ACTIVITY_REASON, "활동 기록 없음")
-                ?: "활동 기록 없음"
+                ?: "활동 기록 없음",
+            lastHeartbeatMs = heartbeatMs,
+            deviceAlias = deviceAlias
         )
     }
 
     companion object {
         private const val FILE_NAME = "lifelink_monitoring"
         private const val KEY_MONITOR_HOURS = "monitor_hours"
-        private const val KEY_ENABLED = "monitoring_enabled"
+        // Keep the existing preference key so upgrades preserve the user's intent.
+        private const val KEY_DESIRED_ENABLED = "monitoring_enabled"
         private const val KEY_SETUP_COMPLETED = "setup_completed"
         private const val KEY_DEADLINE_MS = "deadline_ms"
         private const val KEY_LAST_ACTIVITY_MS = "last_activity_ms"
         private const val KEY_LAST_ACTIVITY_REASON = "last_activity_reason"
         private const val KEY_PRE_ALERT_DEADLINE_MS = "pre_alert_deadline_ms"
         private const val KEY_EMERGENCY_DEADLINE_MS = "emergency_deadline_ms"
-        private const val KEY_EMERGENCY_ATTEMPT_DEADLINE_MS = "emergency_attempt_deadline_ms"
-        private const val KEY_EMERGENCY_ATTEMPT_MS = "emergency_attempt_ms"
-        const val EMERGENCY_RETRY_INTERVAL_MS = 5 * 60 * 1_000L
+        private const val KEY_RUNTIME_STATE = "runtime_state"
+        private const val KEY_STATE_UPDATED_MS = "runtime_state_updated_ms"
+        private const val KEY_LAST_HEARTBEAT_MS = "last_heartbeat_ms"
+        private const val KEY_SERVICE_ERROR = "service_error"
+        private const val KEY_DEVICE_ALIAS = "device_alias"
+        private const val KEY_SMS_SUBSCRIPTION_ID = "sms_subscription_id"
+        private const val INVALID_SUBSCRIPTION_ID = -1
+        private const val DEFAULT_DEVICE_ALIAS = "라이프링크 사용자"
+        const val HEARTBEAT_TIMEOUT_MS = 45_000L
+        const val START_TIMEOUT_MS = 30_000L
     }
 }

@@ -1,6 +1,0 @@
-{
-  "name": "라이프링크",
-  "description": "고령 가구의 활동 패턴과 움직임을 감지하여 비반응 상태 지속 시 긴급 문자 및 정밀 위치를 보호자에게 자동 전송하는 안전 지킴이 앱",
-  "requestFramePermissions": [],
-  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
-}

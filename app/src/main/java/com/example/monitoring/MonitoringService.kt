@@ -1,7 +1,6 @@
 package com.example.monitoring
 
 import android.Manifest
-import android.annotation.SuppressLint
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
@@ -10,7 +9,6 @@ import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.content.pm.ServiceInfo
-import android.location.Location
 import android.os.BatteryManager
 import android.os.Build
 import android.os.IBinder
@@ -24,8 +22,6 @@ import com.example.data.DeadlineCalculator
 import com.example.data.LifeLinkRepository
 import com.example.data.MonitoringStore
 import com.example.data.SensorMonitor
-import com.google.android.gms.location.LocationServices
-import com.google.android.gms.location.Priority
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -35,9 +31,6 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.suspendCancellableCoroutine
-import kotlinx.coroutines.withTimeoutOrNull
-import kotlin.coroutines.resume
 
 class MonitoringService : Service() {
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
@@ -45,29 +38,41 @@ class MonitoringService : Service() {
     private lateinit var repository: LifeLinkRepository
     private lateinit var sensorMonitor: SensorMonitor
     private var monitorJob: Job? = null
+    private var lastBlockingAlertMs = 0L
+    private var startupFailed = false
 
     override fun onCreate() {
         super.onCreate()
         store = MonitoringStore(this)
         repository = LifeLinkRepository(AppDatabase.getDatabase(this))
+        SmsDispatchStore(this).pruneExpired()
+        if (!store.desiredEnabled) {
+            stopSelf()
+            return
+        }
+        store.markServiceStarting()
         createNotificationChannels()
         if (!startForegroundSafely()) {
+            startupFailed = true
+            stopSelf()
+            return
+        }
+        val smsSetup = SmsDeviceManager(this, store).inspect()
+        if (smsSetup !is SmsSetupState.Ready) {
+            startupFailed = true
+            store.markServiceError(smsSetup.userMessage())
             stopSelf()
             return
         }
         sensorMonitor = SensorMonitor(this) { reason ->
-            if (store.isEnabled) store.resetDeadline(reason = reason)
+            if (store.desiredEnabled) store.resetDeadline(reason = reason)
         }
         sensorMonitor.start()
+        store.markServiceRunning()
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         when (intent?.action) {
-            ACTION_STOP -> {
-                store.stop()
-                stopSelf()
-                return START_NOT_STICKY
-            }
             ACTION_REPORT_SAFE -> {
                 store.resetDeadline(reason = "알림에서 무사 확인")
                 NotificationManagerCompat.from(this).cancel(ALERT_NOTIFICATION_ID)
@@ -81,7 +86,7 @@ class MonitoringService : Service() {
             ACTION_START -> store.initializeDeadlineIfMissing()
         }
 
-        if (!store.isEnabled) {
+        if (!store.desiredEnabled) {
             stopSelf()
             return START_NOT_STICKY
         }
@@ -95,6 +100,9 @@ class MonitoringService : Service() {
         if (::sensorMonitor.isInitialized) sensorMonitor.stop()
         monitorJob?.cancel()
         serviceScope.cancel()
+        if (::store.isInitialized && store.desiredEnabled && !startupFailed) {
+            store.markServiceError("모니터링 서비스가 종료되었습니다.")
+        }
         super.onDestroy()
     }
 
@@ -102,7 +110,8 @@ class MonitoringService : Service() {
         if (monitorJob?.isActive == true) return
         monitorJob = serviceScope.launch {
             repository.insertLog("SAFETY_INIT", "백그라운드 안심 모니터링이 시작되었습니다.")
-            while (isActive && store.isEnabled) {
+            while (isActive && store.desiredEnabled) {
+                store.markHeartbeat()
                 evaluateDeadline()
                 delay(CHECK_INTERVAL_MS)
             }
@@ -126,46 +135,62 @@ class MonitoringService : Service() {
             )
         }
 
-        if (
-            snapshot.remainingSeconds == 0L &&
-            !store.wasEmergencyDispatched(snapshot.deadlineMs) &&
-            store.canAttemptEmergency(snapshot.deadlineMs)
-        ) {
-            store.markEmergencyAttempt(snapshot.deadlineMs)
-            if (dispatchEmergency(snapshot.deadlineMs)) {
-                store.markEmergency(snapshot.deadlineMs)
-            }
+        if (snapshot.remainingSeconds == 0L && !store.wasEmergencyDispatched(snapshot.deadlineMs)) {
+            dispatchEmergency(snapshot.deadlineMs)
         }
     }
 
-    private suspend fun dispatchEmergency(deadlineMs: Long): Boolean {
+    private suspend fun dispatchEmergency(deadlineMs: Long) {
         val contacts = repository.allContacts.first().take(3)
         if (contacts.isEmpty()) {
-            repository.insertLog("SMS_FAILED", "등록된 긴급 연락처가 없어 문자를 보낼 수 없습니다.")
-            showAlertNotification("긴급 연락처가 없습니다", "앱을 열어 긴급 연락처를 등록해 주세요.")
-            return false
+            reportBlockingDispatchProblem(
+                logMessage = "등록된 긴급 연락처가 없어 문자를 보낼 수 없습니다.",
+                title = "긴급 연락처가 없습니다",
+                body = "앱을 열어 긴급 연락처를 등록해 주세요."
+            )
+            return
         }
         if (ContextCompat.checkSelfPermission(this, Manifest.permission.SEND_SMS) != PackageManager.PERMISSION_GRANTED) {
-            repository.insertLog("SMS_FAILED", "문자 권한이 없어 긴급 문자를 보낼 수 없습니다.")
-            showAlertNotification("문자 권한이 필요합니다", "앱 설정에서 문자 권한을 허용해 주세요.")
-            return false
+            reportBlockingDispatchProblem(
+                logMessage = "문자 권한이 없어 긴급 문자를 보낼 수 없습니다.",
+                title = "문자 권한이 필요합니다",
+                body = "앱 설정에서 문자 권한을 허용해 주세요."
+            )
+            return
         }
 
-        val location = getCurrentLocationOrNull()
-        val message = EmergencyMessageBuilder.build(location, getBatteryPercentageOrNull())
+        val smsSetup = SmsDeviceManager(this, store).inspect()
+        if (smsSetup !is SmsSetupState.Ready) {
+            reportBlockingDispatchProblem(
+                logMessage = smsSetup.userMessage(),
+                title = "문자 발송 환경 확인 필요",
+                body = smsSetup.userMessage()
+            )
+            return
+        }
+
+        val message = EmergencyMessageBuilder.build(store.deviceAlias, getBatteryPercentageOrNull())
         val sender = EmergencySmsSender(this)
-        var allRequestsAccepted = true
+        var queuedAny = false
+
         contacts.forEach { contact ->
+            val eventId = EmergencySmsSender.emergencyEventId(deadlineMs, contact.id)
             try {
-                val queued = sender.send(deadlineMs, contact, message)
-                if (!queued) {
+                if (
+                    sender.queue(
+                        eventId = eventId,
+                        contact = contact,
+                        message = message,
+                        subscriptionId = smsSetup.line.subscriptionId
+                    ) == SmsQueueResult.QUEUED
+                ) {
+                    queuedAny = true
                     repository.insertLog(
-                        "SMS_SKIPPED",
-                        "${contact.name} 보호자에게 같은 긴급 문자를 중복 요청하지 않았습니다."
+                        "SMS_QUEUED",
+                        "${contact.name} 보호자 문자 발송 결과를 기다리고 있습니다."
                     )
                 }
             } catch (error: Exception) {
-                allRequestsAccepted = false
                 repository.insertLog(
                     "SMS_FAILED",
                     "${contact.name} 보호자 문자 발송 요청에 실패했습니다.",
@@ -173,16 +198,40 @@ class MonitoringService : Service() {
                 )
             }
         }
-        showAlertNotification(
-            if (allRequestsAccepted) "긴급 문자 발송 결과 확인 중" else "일부 문자 발송 재시도 예정",
-            if (allRequestsAccepted) {
-                "등록된 보호자에게 문자를 요청했습니다. 기록에서 결과를 확인하세요."
+
+        val statuses = contacts.map { contact ->
+            sender.status(EmergencySmsSender.emergencyEventId(deadlineMs, contact.id))
+        }
+        if (statuses.all { it.isResolved }) {
+            store.markEmergency(deadlineMs)
+            val failedCount = statuses.count { it.state == SmsDispatchState.FAILED_FINAL }
+            if (failedCount == 0) {
+                showAlertNotification(
+                    "긴급 문자 발송 확인",
+                    "모든 보호자 문자 발송이 확인되었습니다."
+                )
             } else {
-                "보내지 못한 문자는 5분 뒤 다시 시도합니다."
+                showAlertNotification(
+                    "긴급 문자 일부 실패",
+                    "${failedCount}명의 보호자에게 3회 시도했지만 발송하지 못했습니다."
+                )
             }
-        )
-        return allRequestsAccepted
+        } else if (queuedAny) {
+            showAlertNotification(
+                "긴급 문자 발송 확인 중",
+                "통신사 발송 결과를 확인하고 있으며 실패 시 최대 3회 다시 시도합니다."
+            )
+        }
     }
+
+    private suspend fun reportBlockingDispatchProblem(logMessage: String, title: String, body: String) {
+        val nowMs = System.currentTimeMillis()
+        if (nowMs - lastBlockingAlertMs < BLOCKING_ALERT_INTERVAL_MS) return
+        lastBlockingAlertMs = nowMs
+        repository.insertLog("SMS_FAILED", logMessage)
+        showAlertNotification(title, body)
+    }
+
     private fun startForegroundSafely(): Boolean = try {
         ServiceCompat.startForeground(
             this,
@@ -195,12 +244,13 @@ class MonitoringService : Service() {
             }
         )
         true
-    } catch (error: SecurityException) {
+    } catch (error: RuntimeException) {
+        store.markServiceError(error.message ?: "포그라운드 서비스를 시작하지 못했습니다.")
         serviceScope.launch {
             repository.insertLog(
                 "SYSTEM_ERROR",
-                "백그라운드 모니터링 권한이 없어 서비스를 시작하지 못했습니다.",
-                error.message ?: "권한 오류"
+                "백그라운드 모니터링 서비스를 시작하지 못했습니다.",
+                error.message ?: "서비스 시작 오류"
             )
         }
         false
@@ -265,6 +315,7 @@ class MonitoringService : Service() {
             PackageManager.PERMISSION_GRANTED
         if (allowed) NotificationManagerCompat.from(this).notify(id, notification)
     }
+
     private fun createNotificationChannels() {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
         val manager = getSystemService(NotificationManager::class.java)
@@ -293,27 +344,6 @@ class MonitoringService : Service() {
         return value.takeIf { it in 0..100 }
     }
 
-    @SuppressLint("MissingPermission")
-    private suspend fun getCurrentLocationOrNull(): Location? {
-        val hasFine = ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) ==
-            PackageManager.PERMISSION_GRANTED
-        val hasCoarse = ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_COARSE_LOCATION) ==
-            PackageManager.PERMISSION_GRANTED
-        if (!hasFine && !hasCoarse) return null
-
-        return withTimeoutOrNull(LOCATION_TIMEOUT_MS) {
-            suspendCancellableCoroutine { continuation ->
-                LocationServices.getFusedLocationProviderClient(this@MonitoringService)
-                    .getCurrentLocation(Priority.PRIORITY_BALANCED_POWER_ACCURACY, null)
-                    .addOnCompleteListener { task ->
-                        if (continuation.isActive) {
-                            continuation.resume(if (task.isSuccessful) task.result else null)
-                        }
-                    }
-            }
-        }
-    }
-
     private fun formatRemaining(seconds: Long): String {
         val hours = seconds / 3600
         val minutes = (seconds % 3600) / 60
@@ -322,7 +352,6 @@ class MonitoringService : Service() {
 
     companion object {
         const val ACTION_START = "com.bboysilver.lifelink.action.START"
-        const val ACTION_STOP = "com.bboysilver.lifelink.action.STOP"
         const val ACTION_RESET = "com.bboysilver.lifelink.action.RESET"
         const val ACTION_REPORT_SAFE = "com.bboysilver.lifelink.action.REPORT_SAFE"
         const val EXTRA_REASON = "reason"
@@ -331,20 +360,35 @@ class MonitoringService : Service() {
         private const val MONITORING_NOTIFICATION_ID = 1001
         private const val ALERT_NOTIFICATION_ID = 1002
         private const val CHECK_INTERVAL_MS = 15_000L
-        private const val LOCATION_TIMEOUT_MS = 10_000L
+        private const val BLOCKING_ALERT_INTERVAL_MS = 5 * 60 * 1_000L
 
         fun start(context: Context) {
-            ContextCompat.startForegroundService(
-                context,
-                Intent(context, MonitoringService::class.java).setAction(ACTION_START)
-            )
+            val store = MonitoringStore(context)
+            if (!store.desiredEnabled) return
+            val smsSetup = SmsDeviceManager(context, store).inspect()
+            if (smsSetup !is SmsSetupState.Ready) {
+                store.markServiceError(smsSetup.userMessage())
+                return
+            }
+            store.markServiceStarting()
+            try {
+                ContextCompat.startForegroundService(
+                    context,
+                    Intent(context, MonitoringService::class.java).setAction(ACTION_START)
+                )
+            } catch (error: RuntimeException) {
+                store.markServiceError(error.message ?: "서비스 시작 요청에 실패했습니다.")
+                throw error
+            }
         }
 
         fun stop(context: Context) {
-            context.startService(Intent(context, MonitoringService::class.java).setAction(ACTION_STOP))
+            MonitoringStore(context).stop()
+            context.stopService(Intent(context, MonitoringService::class.java))
         }
 
         fun reset(context: Context, reason: String) {
+            if (!MonitoringStore(context).desiredEnabled) return
             ContextCompat.startForegroundService(
                 context,
                 Intent(context, MonitoringService::class.java)

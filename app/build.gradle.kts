@@ -27,8 +27,8 @@ android {
     applicationId = "com.bboysilver.lifelink"
     minSdk = 24
     targetSdk = 36
-    versionCode = 18
-    versionName = "2.1.0"
+    versionCode = 20
+    versionName = "2.1.2"
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
   }
 
@@ -79,7 +79,7 @@ dependencies {
   implementation(libs.androidx.room.runtime)
   implementation(libs.kotlinx.coroutines.android)
   implementation(libs.kotlinx.coroutines.core)
-  implementation(libs.play.services.location)
+
 
   testImplementation(libs.androidx.compose.ui.test.junit4)
   testImplementation(libs.androidx.core)

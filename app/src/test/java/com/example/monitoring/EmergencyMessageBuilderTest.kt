@@ -1,34 +1,37 @@
 package com.example.monitoring
 
-import android.location.Location
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
-import org.junit.runner.RunWith
-import org.robolectric.RobolectricTestRunner
 
-@RunWith(RobolectricTestRunner::class)
 class EmergencyMessageBuilderTest {
     @Test
-    fun missingSignalsAreReportedAsUnavailable() {
-        val message = EmergencyMessageBuilder.build(location = null, batteryPercent = null)
+    fun missingBatteryIsReportedWithoutInventingLocation() {
+        val message = EmergencyMessageBuilder.build(
+            deviceAlias = "아버지 휴대전화",
+            batteryPercent = null
+        )
 
-        assertTrue(message.contains("위치: 위치 확인 불가"))
+        assertTrue(message.contains("아버지 휴대전화"))
         assertTrue(message.contains("배터리: 확인 불가"))
+        assertTrue(message.contains("위치 정보는 수집하지 않습니다"))
         assertFalse(message.contains("37.5665"))
         assertFalse(message.contains("78%"))
     }
 
     @Test
-    fun availableLocationAndBatteryAreIncluded() {
-        val location = Location("test").apply {
-            latitude = 35.1796
-            longitude = 129.0756
-        }
+    fun batteryAndDeviceAliasAreIncluded() {
+        val message = EmergencyMessageBuilder.build("어머니", 42)
 
-        val message = EmergencyMessageBuilder.build(location, 42)
-
-        assertTrue(message.contains("35.1796,129.0756"))
+        assertTrue(message.contains("어머니"))
         assertTrue(message.contains("배터리: 42%"))
+    }
+
+    @Test
+    fun testMessageIsClearlyMarkedAsTest() {
+        val message = EmergencyMessageBuilder.buildTest("어머니")
+
+        assertTrue(message.contains("테스트"))
+        assertTrue(message.contains("긴급 상황이 아닙니다"))
     }
 }

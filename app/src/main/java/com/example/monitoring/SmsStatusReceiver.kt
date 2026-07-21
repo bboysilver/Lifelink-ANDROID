@@ -17,22 +17,36 @@ class SmsStatusReceiver : BroadcastReceiver() {
         val eventId = intent.getStringExtra(EXTRA_EVENT_ID) ?: return
         val contactName = intent.getStringExtra(EXTRA_CONTACT_NAME) ?: "보호자"
         val phoneSuffix = intent.getStringExtra(EXTRA_PHONE_SUFFIX).orEmpty()
+        val attempt = intent.getIntExtra(EXTRA_ATTEMPT, 0)
         val partIndex = intent.getIntExtra(EXTRA_PART_INDEX, -1)
         val totalParts = intent.getIntExtra(EXTRA_TOTAL_PARTS, 0)
-        if (partIndex !in 0 until totalParts) return
+        if (attempt <= 0 || partIndex !in 0 until totalParts) return
 
+        // BroadcastReceiver 결과는 goAsync() 전에 캡처해야 비동기 처리 중에도 보존된다.
+        val callbackResultCode = resultCode
+        val callbackStage = when (intent.action) {
+            ACTION_SMS_SENT -> SmsCallbackStage.SENT
+            ACTION_SMS_DELIVERED -> SmsCallbackStage.DELIVERED
+            else -> return
+        }
         val pendingResult = goAsync()
         CoroutineScope(SupervisorJob() + Dispatchers.IO).launch {
             try {
-                recordResult(
-                    context.applicationContext,
-                    intent.action,
-                    eventId,
-                    contactName,
-                    phoneSuffix,
-                    partIndex,
-                    totalParts,
-                    resultCode
+                val outcome = SmsDispatchStore(context.applicationContext).recordCallback(
+                    stage = callbackStage,
+                    eventId = eventId,
+                    attempt = attempt,
+                    partIndex = partIndex,
+                    totalParts = totalParts,
+                    resultCode = callbackResultCode
+                )
+                logOutcome(
+                    context = context.applicationContext,
+                    eventId = eventId,
+                    outcome = outcome,
+                    contactName = contactName,
+                    phoneSuffix = phoneSuffix,
+                    resultCode = callbackResultCode
                 )
             } finally {
                 pendingResult.finish()
@@ -40,57 +54,45 @@ class SmsStatusReceiver : BroadcastReceiver() {
         }
     }
 
-    private suspend fun recordResult(
+    private suspend fun logOutcome(
         context: Context,
-        action: String?,
         eventId: String,
+        outcome: SmsCallbackOutcome,
         contactName: String,
         phoneSuffix: String,
-        partIndex: Int,
-        totalParts: Int,
         resultCode: Int
     ) {
         val repository = LifeLinkRepository(AppDatabase.getDatabase(context))
-        val preferences = context.getSharedPreferences(EmergencySmsSender.STATUS_FILE, Context.MODE_PRIVATE)
-        val stage = if (action == ACTION_SMS_DELIVERED) "delivered" else "sent"
-        val partKey = "$stage:$eventId:$partIndex"
-        val completionKey = "$stage:complete:$eventId"
-        var finalStatus: Boolean? = null
-
-        synchronized(EmergencySmsSender.LOCK) {
-            if (preferences.contains(partKey) || preferences.getBoolean(completionKey, false)) return
-            val succeeded = resultCode == Activity.RESULT_OK
-            preferences.edit().putBoolean(partKey, succeeded).commit()
-            if (!succeeded) {
-                preferences.edit().putBoolean(completionKey, true).commit()
-                finalStatus = false
-            } else {
-                val allSucceeded = (0 until totalParts).all {
-                    preferences.getBoolean("$stage:$eventId:$it", false)
-                }
-                if (allSucceeded) {
-                    preferences.edit().putBoolean(completionKey, true).commit()
-                    finalStatus = true
-                }
-            }
-        }
-
-        when (finalStatus) {
-            true -> repository.insertLog(
-                if (stage == "delivered") "SMS_DELIVERED" else "SMS_SENT",
-                if (stage == "delivered") {
-                    "$contactName 보호자에게 문자 전달이 확인되었습니다."
-                } else {
-                    "$contactName 보호자에게 문자 발송이 확인되었습니다."
-                },
-                "수신 번호: ****$phoneSuffix"
+        val maskedPhone = "수신 번호: ****$phoneSuffix"
+        val isTest = SmsDispatchStore.isTestEvent(eventId)
+        when (outcome) {
+            SmsCallbackOutcome.SENT -> repository.insertLog(
+                "SMS_SENT",
+                if (isTest) "$contactName 보호자 테스트 문자 발송이 확인되었습니다." else "$contactName 보호자에게 문자 발송이 확인되었습니다.",
+                maskedPhone
             )
-            false -> repository.insertLog(
+            SmsCallbackOutcome.DELIVERED -> repository.insertLog(
+                "SMS_DELIVERED",
+                if (isTest) "$contactName 보호자 테스트 문자 전달이 확인되었습니다." else "$contactName 보호자에게 문자 전달이 확인되었습니다.",
+                maskedPhone
+            )
+            SmsCallbackOutcome.FAILED_RETRYABLE -> repository.insertLog(
                 "SMS_FAILED",
-                "$contactName 보호자 문자 ${if (stage == "delivered") "전달" else "발송"}을 확인하지 못했습니다.",
-                "수신 번호: ****$phoneSuffix, 오류: ${resultDescription(resultCode)}"
+                "$contactName 보호자 문자 발송에 실패해 5분 뒤 다시 시도합니다.",
+                "$maskedPhone, 오류: ${resultDescription(resultCode)}"
             )
-            null -> Unit
+            SmsCallbackOutcome.FAILED_FINAL -> repository.insertLog(
+                "SMS_FAILED",
+                if (isTest) "$contactName 보호자 테스트 문자 발송에 실패했습니다. 자동 재시도하지 않습니다." else "$contactName 보호자 문자 발송이 3회 실패했습니다.",
+                "$maskedPhone, 오류: ${resultDescription(resultCode)}"
+            )
+            SmsCallbackOutcome.DELIVERY_UNCONFIRMED -> repository.insertLog(
+                "SMS_DELIVERY_UNCONFIRMED",
+                if (isTest) "$contactName 보호자 테스트 문자의 전달 여부를 확인하지 못했습니다." else "$contactName 보호자에게 보낸 문자의 전달 여부를 확인하지 못했습니다.",
+                "$maskedPhone, 오류: ${resultDescription(resultCode)}"
+            )
+            SmsCallbackOutcome.PENDING,
+            SmsCallbackOutcome.IGNORED -> Unit
         }
     }
 
@@ -100,6 +102,8 @@ class SmsStatusReceiver : BroadcastReceiver() {
         SmsManager.RESULT_ERROR_NO_SERVICE -> "통신 서비스 없음"
         SmsManager.RESULT_ERROR_NULL_PDU -> "문자 데이터 오류"
         SmsManager.RESULT_ERROR_RADIO_OFF -> "통신 기능 꺼짐"
+        SmsDispatchStore.RESULT_CALLBACK_TIMEOUT -> "발송 결과 시간 초과"
+        EmergencySmsSender.RESULT_QUEUE_EXCEPTION -> "발송 요청 오류"
         else -> "코드 $code"
     }
 
@@ -109,6 +113,7 @@ class SmsStatusReceiver : BroadcastReceiver() {
         const val EXTRA_EVENT_ID = "event_id"
         const val EXTRA_CONTACT_NAME = "contact_name"
         const val EXTRA_PHONE_SUFFIX = "phone_suffix"
+        const val EXTRA_ATTEMPT = "attempt"
         const val EXTRA_PART_INDEX = "part_index"
         const val EXTRA_TOTAL_PARTS = "total_parts"
     }
