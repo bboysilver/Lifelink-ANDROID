@@ -51,6 +51,10 @@ class MonitoringStore(context: Context) {
     val desiredEnabled: Boolean
         get() = preferences.getBoolean(KEY_DESIRED_ENABLED, false)
 
+    var smsSubscriptionId: Int
+        get() = preferences.getInt(KEY_SMS_SUBSCRIPTION_ID, INVALID_SUBSCRIPTION_ID)
+        set(value) = preferences.edit().putInt(KEY_SMS_SUBSCRIPTION_ID, value).apply()
+
     val isSetupCompleted: Boolean
         get() = preferences.getBoolean(KEY_SETUP_COMPLETED, false)
 
@@ -216,6 +220,8 @@ class MonitoringStore(context: Context) {
         private const val KEY_LAST_HEARTBEAT_MS = "last_heartbeat_ms"
         private const val KEY_SERVICE_ERROR = "service_error"
         private const val KEY_DEVICE_ALIAS = "device_alias"
+        private const val KEY_SMS_SUBSCRIPTION_ID = "sms_subscription_id"
+        private const val INVALID_SUBSCRIPTION_ID = -1
         private const val DEFAULT_DEVICE_ALIAS = "라이프링크 사용자"
         const val HEARTBEAT_TIMEOUT_MS = 45_000L
         const val START_TIMEOUT_MS = 30_000L

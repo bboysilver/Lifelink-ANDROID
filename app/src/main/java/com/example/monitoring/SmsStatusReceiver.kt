@@ -42,6 +42,7 @@ class SmsStatusReceiver : BroadcastReceiver() {
                 )
                 logOutcome(
                     context = context.applicationContext,
+                    eventId = eventId,
                     outcome = outcome,
                     contactName = contactName,
                     phoneSuffix = phoneSuffix,
@@ -55,6 +56,7 @@ class SmsStatusReceiver : BroadcastReceiver() {
 
     private suspend fun logOutcome(
         context: Context,
+        eventId: String,
         outcome: SmsCallbackOutcome,
         contactName: String,
         phoneSuffix: String,
@@ -62,15 +64,16 @@ class SmsStatusReceiver : BroadcastReceiver() {
     ) {
         val repository = LifeLinkRepository(AppDatabase.getDatabase(context))
         val maskedPhone = "수신 번호: ****$phoneSuffix"
+        val isTest = SmsDispatchStore.isTestEvent(eventId)
         when (outcome) {
             SmsCallbackOutcome.SENT -> repository.insertLog(
                 "SMS_SENT",
-                "$contactName 보호자에게 문자 발송이 확인되었습니다.",
+                if (isTest) "$contactName 보호자 테스트 문자 발송이 확인되었습니다." else "$contactName 보호자에게 문자 발송이 확인되었습니다.",
                 maskedPhone
             )
             SmsCallbackOutcome.DELIVERED -> repository.insertLog(
                 "SMS_DELIVERED",
-                "$contactName 보호자에게 문자 전달이 확인되었습니다.",
+                if (isTest) "$contactName 보호자 테스트 문자 전달이 확인되었습니다." else "$contactName 보호자에게 문자 전달이 확인되었습니다.",
                 maskedPhone
             )
             SmsCallbackOutcome.FAILED_RETRYABLE -> repository.insertLog(
@@ -80,12 +83,12 @@ class SmsStatusReceiver : BroadcastReceiver() {
             )
             SmsCallbackOutcome.FAILED_FINAL -> repository.insertLog(
                 "SMS_FAILED",
-                "$contactName 보호자 문자 발송이 3회 실패했습니다.",
+                if (isTest) "$contactName 보호자 테스트 문자 발송에 실패했습니다. 자동 재시도하지 않습니다." else "$contactName 보호자 문자 발송이 3회 실패했습니다.",
                 "$maskedPhone, 오류: ${resultDescription(resultCode)}"
             )
             SmsCallbackOutcome.DELIVERY_UNCONFIRMED -> repository.insertLog(
                 "SMS_DELIVERY_UNCONFIRMED",
-                "$contactName 보호자에게 보낸 문자의 전달 여부를 확인하지 못했습니다.",
+                if (isTest) "$contactName 보호자 테스트 문자의 전달 여부를 확인하지 못했습니다." else "$contactName 보호자에게 보낸 문자의 전달 여부를 확인하지 못했습니다.",
                 "$maskedPhone, 오류: ${resultDescription(resultCode)}"
             )
             SmsCallbackOutcome.PENDING,

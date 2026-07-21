@@ -45,6 +45,7 @@ class MonitoringService : Service() {
         super.onCreate()
         store = MonitoringStore(this)
         repository = LifeLinkRepository(AppDatabase.getDatabase(this))
+        SmsDispatchStore(this).pruneExpired()
         if (!store.desiredEnabled) {
             stopSelf()
             return
@@ -53,6 +54,13 @@ class MonitoringService : Service() {
         createNotificationChannels()
         if (!startForegroundSafely()) {
             startupFailed = true
+            stopSelf()
+            return
+        }
+        val smsSetup = SmsDeviceManager(this, store).inspect()
+        if (smsSetup !is SmsSetupState.Ready) {
+            startupFailed = true
+            store.markServiceError(smsSetup.userMessage())
             stopSelf()
             return
         }
@@ -151,6 +159,16 @@ class MonitoringService : Service() {
             return
         }
 
+        val smsSetup = SmsDeviceManager(this, store).inspect()
+        if (smsSetup !is SmsSetupState.Ready) {
+            reportBlockingDispatchProblem(
+                logMessage = smsSetup.userMessage(),
+                title = "문자 발송 환경 확인 필요",
+                body = smsSetup.userMessage()
+            )
+            return
+        }
+
         val message = EmergencyMessageBuilder.build(store.deviceAlias, getBatteryPercentageOrNull())
         val sender = EmergencySmsSender(this)
         var queuedAny = false
@@ -158,7 +176,14 @@ class MonitoringService : Service() {
         contacts.forEach { contact ->
             val eventId = EmergencySmsSender.emergencyEventId(deadlineMs, contact.id)
             try {
-                if (sender.queue(eventId, contact, message) == SmsQueueResult.QUEUED) {
+                if (
+                    sender.queue(
+                        eventId = eventId,
+                        contact = contact,
+                        message = message,
+                        subscriptionId = smsSetup.line.subscriptionId
+                    ) == SmsQueueResult.QUEUED
+                ) {
                     queuedAny = true
                     repository.insertLog(
                         "SMS_QUEUED",
@@ -340,6 +365,11 @@ class MonitoringService : Service() {
         fun start(context: Context) {
             val store = MonitoringStore(context)
             if (!store.desiredEnabled) return
+            val smsSetup = SmsDeviceManager(context, store).inspect()
+            if (smsSetup !is SmsSetupState.Ready) {
+                store.markServiceError(smsSetup.userMessage())
+                return
+            }
             store.markServiceStarting()
             try {
                 ContextCompat.startForegroundService(

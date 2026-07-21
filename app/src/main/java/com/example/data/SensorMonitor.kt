@@ -18,39 +18,41 @@ class SensorMonitor(
 ) : SensorEventListener {
 
     private val sensorManager = context.getSystemService(Context.SENSOR_SERVICE) as SensorManager
-    private val accelerometer: Sensor? = sensorManager.getDefaultSensor(Sensor.TYPE_ACCELEROMETER)
+    private val stepDetector = sensorManager.getDefaultSensor(Sensor.TYPE_STEP_DETECTOR)
+    private val accelerometer = sensorManager.getDefaultSensor(Sensor.TYPE_ACCELEROMETER)
+    private val repeatedMotionDetector = RepeatedMotionDetector()
     private var lastX = 0f
     private var lastY = 0f
     private var lastZ = 0f
-    private var lastMotionMs = 0L
+    private var hasAccelerometerSample = false
+    private var lastStepActivityMs = Long.MIN_VALUE
     private var isRegistered = false
 
     private val statusReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context, intent: Intent?) {
-            when (intent?.action) {
-                Intent.ACTION_SCREEN_ON -> onActivityDetected("화면 켜짐 감지")
-                Intent.ACTION_USER_PRESENT -> onActivityDetected("휴대전화 잠금 해제 감지")
-            }
+            ActivitySignalClassifier.reasonForBroadcast(intent?.action)?.let(onActivityDetected)
         }
     }
 
     fun start() {
         if (isRegistered) return
-        accelerometer?.let {
-            sensorManager.registerListener(this, it, SensorManager.SENSOR_DELAY_NORMAL)
+
+        if (stepDetector != null) {
+            sensorManager.registerListener(this, stepDetector, SensorManager.SENSOR_DELAY_NORMAL)
+        } else {
+            accelerometer?.let {
+                sensorManager.registerListener(this, it, SensorManager.SENSOR_DELAY_NORMAL)
+            }
         }
-        val filter = IntentFilter().apply {
-            addAction(Intent.ACTION_SCREEN_ON)
-            addAction(Intent.ACTION_USER_PRESENT)
-        }
+
         ContextCompat.registerReceiver(
             context,
             statusReceiver,
-            filter,
+            IntentFilter(Intent.ACTION_USER_PRESENT),
             ContextCompat.RECEIVER_NOT_EXPORTED
         )
         isRegistered = true
-        Log.d(TAG, "Sensing engine started")
+        Log.d(TAG, if (stepDetector != null) "Step sensing started" else "Repeated motion sensing started")
     }
 
     fun stop() {
@@ -66,22 +68,33 @@ class SensorMonitor(
     }
 
     override fun onSensorChanged(event: SensorEvent?) {
-        if (event == null || event.sensor.type != Sensor.TYPE_ACCELEROMETER) return
+        when (event?.sensor?.type) {
+            Sensor.TYPE_STEP_DETECTOR -> handleStep(System.currentTimeMillis())
+            Sensor.TYPE_ACCELEROMETER -> handleAccelerometer(event, System.currentTimeMillis())
+        }
+    }
 
+    private fun handleStep(nowMs: Long) {
+        if (lastStepActivityMs == Long.MIN_VALUE || nowMs - lastStepActivityMs >= ACTIVITY_COOLDOWN_MS) {
+            lastStepActivityMs = nowMs
+            onActivityDetected("걸음 감지")
+        }
+    }
+
+    private fun handleAccelerometer(event: SensorEvent, nowMs: Long) {
         val x = event.values[0]
         val y = event.values[1]
         val z = event.values[2]
-        val deltaX = x - lastX
-        val deltaY = y - lastY
-        val deltaZ = z - lastZ
-        val motion = sqrt(deltaX * deltaX + deltaY * deltaY + deltaZ * deltaZ)
-        val nowMs = System.currentTimeMillis()
-
-        if (lastX != 0f && motion > MOTION_THRESHOLD && nowMs - lastMotionMs >= MOTION_COOLDOWN_MS) {
-            lastMotionMs = nowMs
-            onActivityDetected("걷기 또는 휴대전화 움직임 감지")
+        if (hasAccelerometerSample) {
+            val deltaX = x - lastX
+            val deltaY = y - lastY
+            val deltaZ = z - lastZ
+            val motion = sqrt(deltaX * deltaX + deltaY * deltaY + deltaZ * deltaZ)
+            if (motion > MOTION_THRESHOLD && repeatedMotionDetector.record(nowMs)) {
+                onActivityDetected("반복된 휴대전화 움직임 감지")
+            }
         }
-
+        hasAccelerometerSample = true
         lastX = x
         lastY = y
         lastZ = z
@@ -92,6 +105,6 @@ class SensorMonitor(
     companion object {
         private const val TAG = "SensorMonitor"
         private const val MOTION_THRESHOLD = 3.5f
-        private const val MOTION_COOLDOWN_MS = 60_000L
+        private const val ACTIVITY_COOLDOWN_MS = 60_000L
     }
 }

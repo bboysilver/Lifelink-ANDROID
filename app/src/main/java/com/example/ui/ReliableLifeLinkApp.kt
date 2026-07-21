@@ -72,6 +72,9 @@ import androidx.core.content.ContextCompat
 import com.example.data.Contact
 import com.example.data.EventLog
 import com.example.data.MonitoringRuntimeState
+import com.example.monitoring.SmsSetupIssue
+import com.example.monitoring.SmsSetupState
+import com.example.monitoring.userMessage
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -81,6 +84,7 @@ fun LifeLinkApp(viewModel: LifeLinkViewModel) {
     val context = LocalContext.current
     val setupCompleted by viewModel.setupCompleted.collectAsState()
     val alertState by viewModel.alertState.collectAsState()
+    val smsSetupState by viewModel.smsSetupState.collectAsState()
     var selectedTab by remember { mutableStateOf(0) }
     var permissionsReady by remember { mutableStateOf(hasCorePermissions(context)) }
 
@@ -88,6 +92,14 @@ fun LifeLinkApp(viewModel: LifeLinkViewModel) {
         ActivityResultContracts.RequestPermission()
     ) {
         permissionsReady = hasCorePermissions(context)
+        viewModel.refreshSmsSetup()
+        if (permissionsReady) viewModel.ensureMonitoringStarted()
+    }
+    val phonePermissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) {
+        permissionsReady = hasCorePermissions(context)
+        viewModel.refreshSmsSetup()
         if (permissionsReady) viewModel.ensureMonitoringStarted()
     }
     val activityPermissionLauncher = rememberLauncherForActivityResult(
@@ -105,6 +117,7 @@ fun LifeLinkApp(viewModel: LifeLinkViewModel) {
 
     LaunchedEffect(setupCompleted) {
         permissionsReady = hasCorePermissions(context)
+        viewModel.refreshSmsSetup()
         if (setupCompleted && permissionsReady) viewModel.ensureMonitoringStarted()
     }
 
@@ -142,7 +155,11 @@ fun LifeLinkApp(viewModel: LifeLinkViewModel) {
                 0 -> DashboardTab(
                     viewModel = viewModel,
                     permissionsReady = permissionsReady,
+                    smsSetupState = smsSetupState,
                     requestSmsPermission = { smsPermissionLauncher.launch(Manifest.permission.SEND_SMS) },
+                    requestPhonePermission = {
+                        phonePermissionLauncher.launch(Manifest.permission.READ_PHONE_STATE)
+                    },
                     requestActivityPermission = {
                         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                             activityPermissionLauncher.launch(Manifest.permission.ACTIVITY_RECOGNITION)
@@ -165,7 +182,9 @@ fun LifeLinkApp(viewModel: LifeLinkViewModel) {
 private fun DashboardTab(
     viewModel: LifeLinkViewModel,
     permissionsReady: Boolean,
+    smsSetupState: SmsSetupState,
     requestSmsPermission: () -> Unit,
+    requestPhonePermission: () -> Unit,
     requestActivityPermission: () -> Unit,
     requestNotificationPermission: () -> Unit
 ) {
@@ -178,6 +197,8 @@ private fun DashboardTab(
     val runtimeState by viewModel.runtimeState.collectAsState()
     val serviceError by viewModel.serviceError.collectAsState()
     val monitorHours by viewModel.monitorHours.collectAsState()
+    val smsReady = smsSetupState is SmsSetupState.Ready
+    val canStart = permissionsReady && smsReady
 
     LazyColumn(
         modifier = Modifier.fillMaxSize().padding(20.dp),
@@ -196,7 +217,7 @@ private fun DashboardTab(
                 IconButton(
                     onClick = {
                         if (desiredMonitoring) viewModel.stopMonitoring()
-                        else if (permissionsReady) viewModel.startMonitoring()
+                        else if (canStart) viewModel.startMonitoring()
                     },
                     modifier = Modifier.testTag("toggle_monitoring_button")
                 ) {
@@ -209,13 +230,17 @@ private fun DashboardTab(
             }
         }
 
-        if (!permissionsReady) {
+        if (!permissionsReady || !smsReady) {
             item {
                 PermissionSetupCard(
                     smsGranted = hasSmsPermission(context),
+                    phoneStateGranted = hasPhoneStatePermission(context),
+                    smsSetupState = smsSetupState,
                     activityGranted = hasActivityPermission(context),
                     notificationGranted = hasNotificationPermission(context),
                     requestSmsPermission = requestSmsPermission,
+                    requestPhonePermission = requestPhonePermission,
+                    selectSmsLine = viewModel::selectSmsLine,
                     requestActivityPermission = requestActivityPermission,
                     requestNotificationPermission = requestNotificationPermission
                 )
@@ -227,7 +252,7 @@ private fun DashboardTab(
             Card(
                 colors = CardDefaults.cardColors(
                     containerColor = when {
-                        !permissionsReady || hasRuntimeError -> MaterialTheme.colorScheme.errorContainer
+                        !canStart || hasRuntimeError -> MaterialTheme.colorScheme.errorContainer
                         alertState == 1 -> Color(0xFFFFF3CD)
                         alertState == 2 -> MaterialTheme.colorScheme.errorContainer
                         else -> MaterialTheme.colorScheme.primaryContainer
@@ -242,6 +267,7 @@ private fun DashboardTab(
                     Text(
                         when {
                             !permissionsReady -> "권한 설정 필요"
+                            !smsReady -> "문자 발송 설정 필요"
                             !desiredMonitoring -> "모니터링 일시 중지"
                             runtimeState == MonitoringRuntimeState.STARTING -> "모니터링 시작 중"
                             runtimeState == MonitoringRuntimeState.ERROR -> "모니터링 중단됨"
@@ -253,10 +279,13 @@ private fun DashboardTab(
                         fontSize = 20.sp,
                         fontWeight = FontWeight.Bold
                     )
+                    if (!smsReady) {
+                        Text(smsSetupState.userMessage(), textAlign = TextAlign.Center, fontSize = 13.sp)
+                    }
                     if (runtimeState == MonitoringRuntimeState.ERROR && serviceError.isNotBlank()) {
                         Text(serviceError, textAlign = TextAlign.Center, fontSize = 13.sp)
                         Spacer(Modifier.height(8.dp))
-                        if (permissionsReady) {
+                        if (canStart) {
                             OutlinedButton(onClick = viewModel::restartMonitoring) {
                                 Text("모니터링 다시 시작")
                             }
@@ -324,22 +353,46 @@ private fun DashboardTab(
 @Composable
 private fun PermissionSetupCard(
     smsGranted: Boolean,
+    phoneStateGranted: Boolean,
+    smsSetupState: SmsSetupState,
     activityGranted: Boolean,
     notificationGranted: Boolean,
     requestSmsPermission: () -> Unit,
+    requestPhonePermission: () -> Unit,
+    selectSmsLine: (Int) -> Unit,
     requestActivityPermission: () -> Unit,
     requestNotificationPermission: () -> Unit
 ) {
     Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer)) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Text("필수 권한을 하나씩 확인해 주세요", fontWeight = FontWeight.Bold)
-            PermissionRow("긴급 문자 발송", smsGranted, requestSmsPermission)
+            Text("안전 기능 설정을 확인해 주세요", fontWeight = FontWeight.Bold)
+            Text(smsSetupState.userMessage(), fontSize = 13.sp)
+            if (
+                smsSetupState !is SmsSetupState.Blocked ||
+                smsSetupState.issue != SmsSetupIssue.UNSUPPORTED_DEVICE
+            ) {
+                PermissionRow("긴급 문자 발송", smsGranted, requestSmsPermission)
+                PermissionRow("SIM 상태 확인", phoneStateGranted, requestPhonePermission)
+            }
             PermissionRow("휴대전화 활동 감지", activityGranted, requestActivityPermission)
             PermissionRow("사전 경고 알림", notificationGranted, requestNotificationPermission)
+
+            if (
+                smsSetupState is SmsSetupState.Blocked &&
+                smsSetupState.issue == SmsSetupIssue.SIM_SELECTION_REQUIRED
+            ) {
+                smsSetupState.lines.forEach { line ->
+                    OutlinedButton(
+                        onClick = { selectSmsLine(line.subscriptionId) },
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text("${line.label} 사용")
+                    }
+                }
+            }
         }
     }
 }
-
 @Composable
 private fun PermissionRow(label: String, granted: Boolean, request: () -> Unit) {
     Row(
@@ -366,7 +419,7 @@ private fun ContactsTab(viewModel: LifeLinkViewModel) {
     ) {
         item {
             Text("긴급 연락처", fontSize = 24.sp, fontWeight = FontWeight.Black)
-            Text("최대 3명에게 기기의 기본 SMS SIM으로 긴급 문자를 보냅니다.")
+            Text("최대 3명에게 사용자가 선택한 SMS SIM으로 긴급 문자를 보냅니다.")
         }
         item {
             Card(modifier = Modifier.fillMaxWidth()) {
@@ -424,6 +477,31 @@ private fun ContactsTab(viewModel: LifeLinkViewModel) {
 
 @Composable
 private fun ContactItem(contact: Contact, onTest: () -> Unit, onDelete: () -> Unit) {
+    var confirmTest by remember { mutableStateOf(false) }
+    if (confirmTest) {
+        AlertDialog(
+            onDismissRequest = { confirmTest = false },
+            title = { Text("테스트 문자를 보낼까요?") },
+            text = {
+                Text(
+                    "${contact.name} 보호자에게 실제 SMS 1건을 보냅니다. " +
+                        "이 문자는 자동 재시도하지 않으며 60초 동안 다시 보낼 수 없습니다."
+                )
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        confirmTest = false
+                        onTest()
+                    }
+                ) { Text("1회 보내기") }
+            },
+            dismissButton = {
+                TextButton(onClick = { confirmTest = false }) { Text("취소") }
+            }
+        )
+    }
+
     Card(modifier = Modifier.fillMaxWidth()) {
         Row(
             modifier = Modifier.fillMaxWidth().padding(16.dp),
@@ -433,7 +511,7 @@ private fun ContactItem(contact: Contact, onTest: () -> Unit, onDelete: () -> Un
             Column(Modifier.weight(1f)) {
                 Text(contact.name, fontWeight = FontWeight.Bold)
                 Text(contact.phoneNumber)
-                TextButton(onClick = onTest) { Text("테스트 문자 보내기") }
+                TextButton(onClick = { confirmTest = true }) { Text("테스트 문자 보내기") }
             }
             IconButton(onClick = onDelete) {
                 Icon(Icons.Default.Delete, contentDescription = "삭제", tint = MaterialTheme.colorScheme.error)
@@ -441,7 +519,6 @@ private fun ContactItem(contact: Contact, onTest: () -> Unit, onDelete: () -> Un
         }
     }
 }
-
 @Composable
 private fun LogsTab(viewModel: LifeLinkViewModel) {
     val eventLogs by viewModel.eventLogs.collectAsState()
@@ -466,7 +543,7 @@ private fun LogsTab(viewModel: LifeLinkViewModel) {
             Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer)) {
                 Column(Modifier.padding(16.dp)) {
                     Text("현재 전송 방식", fontWeight = FontWeight.Bold)
-                    Text("기기에 설정된 기본 SMS SIM을 통한 자동 문자")
+                    Text("선택한 활성 SIM을 통한 자동 문자")
                     Text("이 버전은 위치 정보를 수집하거나 전송하지 않습니다.", fontSize = 13.sp)
                 }
             }
@@ -525,7 +602,7 @@ private fun StartupSetupDialog(onComplete: () -> Unit) {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text("한 번 설정하면 휴대전화 활동을 백그라운드에서 확인합니다.")
                 Text("설정 시간 동안 활동이 없으면 먼저 알림을 표시하고, 응답이 없을 때 최대 3명의 보호자에게 SIM 문자를 보냅니다.")
-                Text("문자·활동 감지·알림 권한은 다음 화면에서 각각 설명하고 요청합니다. 위치 정보는 수집하지 않습니다.", fontSize = 13.sp)
+                Text("문자·SIM 상태·활동 감지·알림 권한은 다음 화면에서 각각 설명하고 요청합니다. 위치 정보는 수집하지 않습니다.", fontSize = 13.sp)
             }
         },
         confirmButton = { Button(onClick = onComplete) { Text("설정 시작") } }
@@ -539,7 +616,7 @@ private fun PrivacyDialog(onDismiss: () -> Unit, onOpenPolicy: () -> Unit) {
         title = { Text("개인정보 처리방침") },
         text = {
             Text(
-                "보호자 이름과 전화번호, 설정, 최근 활동 시각, 문자 결과 기록은 이 기기에만 저장됩니다. " +
+                "보호자 이름과 전화번호, 선택한 SIM, 설정, 최근 활동 시각, 문자 결과 기록은 이 기기에만 저장됩니다. " +
                     "긴급 시 사용자 이름과 배터리 상태를 등록한 보호자에게 기기 SIM 문자로 전달합니다. " +
                     "위치, Firebase, Twilio, 광고, 결제 또는 외부 클라우드는 사용하지 않습니다. " +
                     "앱 데이터는 기기 백업에서 제외되며 앱 삭제 시 제거됩니다."
@@ -554,6 +631,10 @@ private fun hasSmsPermission(context: Context): Boolean =
     ContextCompat.checkSelfPermission(context, Manifest.permission.SEND_SMS) ==
         PackageManager.PERMISSION_GRANTED
 
+private fun hasPhoneStatePermission(context: Context): Boolean =
+    ContextCompat.checkSelfPermission(context, Manifest.permission.READ_PHONE_STATE) ==
+        PackageManager.PERMISSION_GRANTED
+
 private fun hasActivityPermission(context: Context): Boolean =
     Build.VERSION.SDK_INT < Build.VERSION_CODES.Q ||
         ContextCompat.checkSelfPermission(context, Manifest.permission.ACTIVITY_RECOGNITION) ==
@@ -565,7 +646,8 @@ private fun hasNotificationPermission(context: Context): Boolean =
         PackageManager.PERMISSION_GRANTED
 
 private fun hasCorePermissions(context: Context): Boolean =
-    hasSmsPermission(context) && hasActivityPermission(context) && hasNotificationPermission(context)
+    hasSmsPermission(context) && hasPhoneStatePermission(context) &&
+        hasActivityPermission(context) && hasNotificationPermission(context)
 
 private fun formatRemaining(seconds: Long): String {
     val hours = seconds / 3600

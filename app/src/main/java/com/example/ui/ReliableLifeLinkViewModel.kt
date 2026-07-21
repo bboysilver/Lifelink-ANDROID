@@ -17,7 +17,13 @@ import com.example.data.MonitoringStore
 import com.example.monitoring.EmergencyMessageBuilder
 import com.example.monitoring.EmergencySmsSender
 import com.example.monitoring.MonitoringService
+import com.example.monitoring.SmsDeviceManager
+import com.example.monitoring.SmsDispatchStore
 import com.example.monitoring.SmsQueueResult
+import com.example.monitoring.SmsRetryPolicy
+import com.example.monitoring.SmsSetupIssue
+import com.example.monitoring.SmsSetupState
+import com.example.monitoring.userMessage
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -32,6 +38,8 @@ class LifeLinkViewModel(application: Application) : AndroidViewModel(application
     private val context get() = getApplication<Application>().applicationContext
     private val repository = LifeLinkRepository(AppDatabase.getDatabase(context))
     private val monitoringStore = MonitoringStore(context)
+    private val smsDispatchStore = SmsDispatchStore(context)
+    private val smsDeviceManager = SmsDeviceManager(context, monitoringStore)
 
     val contacts: StateFlow<List<Contact>> = repository.allContacts.stateIn(
         scope = viewModelScope,
@@ -43,6 +51,11 @@ class LifeLinkViewModel(application: Application) : AndroidViewModel(application
         started = SharingStarted.WhileSubscribed(5_000),
         initialValue = emptyList()
     )
+
+    private val _smsSetupState = MutableStateFlow<SmsSetupState>(
+        SmsSetupState.Blocked(SmsSetupIssue.CHECKING)
+    )
+    val smsSetupState: StateFlow<SmsSetupState> = _smsSetupState.asStateFlow()
 
     private val _monitorHours = MutableStateFlow(12)
     val monitorHours: StateFlow<Int> = _monitorHours.asStateFlow()
@@ -96,17 +109,19 @@ class LifeLinkViewModel(application: Application) : AndroidViewModel(application
             if (legacySetupCompleted) monitoringStore.completeSetup()
             _setupCompleted.value = monitoringStore.isSetupCompleted
             monitoringStore.initializeDeadlineIfMissing()
+            refreshSmsSetup()
             startTicker()
         }
     }
 
     fun ensureMonitoringStarted() {
         if (!monitoringStore.isSetupCompleted || !monitoringStore.desiredEnabled) return
+        if (readySmsLineOrLog() == null) return
         startServiceWithoutReset()
     }
 
     fun startMonitoring() {
-        if (!monitoringStore.isSetupCompleted) return
+        if (!monitoringStore.isSetupCompleted || readySmsLineOrLog() == null) return
         monitoringStore.beginStart(reason = "사용자가 모니터링 시작")
         startServiceWithoutReset()
         viewModelScope.launch {
@@ -116,7 +131,7 @@ class LifeLinkViewModel(application: Application) : AndroidViewModel(application
     }
 
     fun restartMonitoring() {
-        if (!monitoringStore.desiredEnabled) return
+        if (!monitoringStore.desiredEnabled || readySmsLineOrLog() == null) return
         monitoringStore.markServiceStarting()
         startServiceWithoutReset()
         refreshUi()
@@ -198,20 +213,30 @@ class LifeLinkViewModel(application: Application) : AndroidViewModel(application
             logValidationError("테스트 문자를 보내려면 문자 권한이 필요합니다.")
             return
         }
+        val smsLine = readySmsLineOrLog() ?: return
+        val nowMs = System.currentTimeMillis()
+        val cooldownRemainingMs = smsDispatchStore.reserveTestSend(contact.id, nowMs)
+        if (cooldownRemainingMs > 0L) {
+            val seconds = (cooldownRemainingMs + 999L) / 1_000L
+            logValidationError("테스트 문자는 ${seconds}초 뒤에 다시 보낼 수 있습니다.")
+            return
+        }
+
         viewModelScope.launch(Dispatchers.IO) {
-            val nowMs = System.currentTimeMillis()
             val eventId = EmergencySmsSender.testEventId(nowMs, contact.id)
             try {
                 val result = EmergencySmsSender(context).queue(
                     eventId = eventId,
                     contact = contact,
                     message = EmergencyMessageBuilder.buildTest(monitoringStore.deviceAlias),
+                    subscriptionId = smsLine.subscriptionId,
+                    retryPolicy = SmsRetryPolicy.ONE_SHOT,
                     nowMs = nowMs
                 )
                 repository.insertLog(
                     "SMS_TEST_QUEUED",
                     if (result == SmsQueueResult.QUEUED) {
-                        "${contact.name} 보호자에게 테스트 문자를 요청했습니다."
+                        "${contact.name} 보호자에게 1회 전용 테스트 문자를 요청했습니다."
                     } else {
                         "테스트 문자 발송 결과를 기다리고 있습니다."
                     }
@@ -225,13 +250,39 @@ class LifeLinkViewModel(application: Application) : AndroidViewModel(application
             }
         }
     }
-
     fun deleteContact(contact: Contact) {
         viewModelScope.launch { repository.deleteContact(contact) }
     }
 
     fun clearAllLogs() {
+        smsDispatchStore.clearAll()
         viewModelScope.launch { repository.clearLogs() }
+    }
+
+    fun refreshSmsSetup() {
+        _smsSetupState.value = smsDeviceManager.inspect()
+    }
+
+    fun selectSmsLine(subscriptionId: Int) {
+        monitoringStore.smsSubscriptionId = subscriptionId
+        refreshSmsSetup()
+        val state = _smsSetupState.value
+        if (state is SmsSetupState.Ready) {
+            viewModelScope.launch {
+                repository.insertLog("SETTINGS_CHANGED", "긴급 문자 회선을 ${state.line.label}(으)로 설정했습니다.")
+            }
+            ensureMonitoringStarted()
+        }
+    }
+
+    private fun readySmsLineOrLog(): com.example.monitoring.SmsLine? {
+        refreshSmsSetup()
+        val state = _smsSetupState.value
+        if (state is SmsSetupState.Ready) return state.line
+        monitoringStore.markServiceError(state.userMessage())
+        logValidationError(state.userMessage())
+        refreshUi()
+        return null
     }
 
     private fun startServiceWithoutReset() {

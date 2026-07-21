@@ -3,19 +3,21 @@ package com.example.monitoring
 import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
-import android.telephony.SmsManager
 import com.example.data.Contact
 
 enum class SmsQueueResult { QUEUED, WAITING, ALREADY_RESOLVED, FAILED_FINAL }
 
 class EmergencySmsSender(
     private val context: Context,
-    private val dispatchStore: SmsDispatchStore = SmsDispatchStore(context)
+    private val dispatchStore: SmsDispatchStore = SmsDispatchStore(context),
+    private val deviceManager: SmsDeviceManager = SmsDeviceManager(context)
 ) {
     fun queue(
         eventId: String,
         contact: Contact,
         message: String,
+        subscriptionId: Int,
+        retryPolicy: SmsRetryPolicy = SmsRetryPolicy.EMERGENCY,
         nowMs: Long = System.currentTimeMillis()
     ): SmsQueueResult {
         dispatchStore.markQueuedTimeoutIfNeeded(eventId, nowMs)
@@ -27,9 +29,9 @@ class EmergencySmsSender(
 
         val phone = contact.phoneNumber.filter { it.isDigit() || it == '+' }
         require(phone.length >= 8) { "Invalid emergency contact number" }
-        val manager = context.getSystemService(SmsManager::class.java)
+        val manager = deviceManager.managerFor(subscriptionId)
         val parts = manager.divideMessage(message)
-        val attempt = dispatchStore.beginAttempt(eventId, parts.size, nowMs)
+        val attempt = dispatchStore.beginAttempt(eventId, parts.size, retryPolicy, nowMs)
             ?: return SmsQueueResult.WAITING
 
         try {
