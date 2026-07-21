@@ -19,3 +19,5 @@ debug.keystore
 key.properties
 *.jks
 *.keystore
+
+/.build-outputs/

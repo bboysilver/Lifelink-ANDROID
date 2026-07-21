@@ -12,7 +12,7 @@ class BootReceiver : BroadcastReceiver() {
             intent.action != Intent.ACTION_MY_PACKAGE_REPLACED
         ) return
         val store = MonitoringStore(context)
-        if (store.isSetupCompleted && store.isEnabled) {
+        if (store.isSetupCompleted && store.desiredEnabled) {
             MonitoringService.start(context)
         }
     }

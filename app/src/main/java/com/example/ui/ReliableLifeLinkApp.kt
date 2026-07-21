@@ -60,6 +60,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -70,6 +71,7 @@ import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import com.example.data.Contact
 import com.example.data.EventLog
+import com.example.data.MonitoringRuntimeState
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -82,26 +84,31 @@ fun LifeLinkApp(viewModel: LifeLinkViewModel) {
     var selectedTab by remember { mutableStateOf(0) }
     var permissionsReady by remember { mutableStateOf(hasCorePermissions(context)) }
 
-    val permissionLauncher = rememberLauncherForActivityResult(
-        ActivityResultContracts.RequestMultiplePermissions()
+    val smsPermissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission()
     ) {
         permissionsReady = hasCorePermissions(context)
         if (permissionsReady) viewModel.ensureMonitoringStarted()
     }
-    val requestPermissions = {
-        permissionLauncher.launch(requiredPermissions())
+    val activityPermissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) {
+        permissionsReady = hasCorePermissions(context)
+        if (permissionsReady) viewModel.ensureMonitoringStarted()
+    }
+    val notificationPermissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) {
+        permissionsReady = hasCorePermissions(context)
+        if (permissionsReady) viewModel.ensureMonitoringStarted()
     }
 
     LaunchedEffect(setupCompleted) {
-        if (setupCompleted) {
-            permissionsReady = hasCorePermissions(context)
-            if (permissionsReady) viewModel.ensureMonitoringStarted() else requestPermissions()
-        }
+        permissionsReady = hasCorePermissions(context)
+        if (setupCompleted && permissionsReady) viewModel.ensureMonitoringStarted()
     }
 
-    if (!setupCompleted) {
-        StartupSetupDialog(onComplete = viewModel::completeSetup)
-    }
+    if (!setupCompleted) StartupSetupDialog(onComplete = viewModel::completeSetup)
     if (alertState == 1) {
         PreAlertDialog(onDismiss = { viewModel.reportSurvival("사전 알림에서 무사 확인") })
     }
@@ -132,7 +139,21 @@ fun LifeLinkApp(viewModel: LifeLinkViewModel) {
     ) { padding ->
         Box(Modifier.fillMaxSize().padding(padding)) {
             when (selectedTab) {
-                0 -> DashboardTab(viewModel, permissionsReady, requestPermissions)
+                0 -> DashboardTab(
+                    viewModel = viewModel,
+                    permissionsReady = permissionsReady,
+                    requestSmsPermission = { smsPermissionLauncher.launch(Manifest.permission.SEND_SMS) },
+                    requestActivityPermission = {
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                            activityPermissionLauncher.launch(Manifest.permission.ACTIVITY_RECOGNITION)
+                        }
+                    },
+                    requestNotificationPermission = {
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                            notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+                        }
+                    }
+                )
                 1 -> ContactsTab(viewModel)
                 else -> LogsTab(viewModel)
             }
@@ -144,12 +165,18 @@ fun LifeLinkApp(viewModel: LifeLinkViewModel) {
 private fun DashboardTab(
     viewModel: LifeLinkViewModel,
     permissionsReady: Boolean,
-    requestPermissions: () -> Unit
+    requestSmsPermission: () -> Unit,
+    requestActivityPermission: () -> Unit,
+    requestNotificationPermission: () -> Unit
 ) {
+    val context = LocalContext.current
     val remainingSeconds by viewModel.remainingSeconds.collectAsState()
     val lastActivity by viewModel.lastSensingMsg.collectAsState()
     val alertState by viewModel.alertState.collectAsState()
     val isMonitoring by viewModel.isMonitoring.collectAsState()
+    val desiredMonitoring by viewModel.desiredMonitoring.collectAsState()
+    val runtimeState by viewModel.runtimeState.collectAsState()
+    val serviceError by viewModel.serviceError.collectAsState()
     val monitorHours by viewModel.monitorHours.collectAsState()
 
     LazyColumn(
@@ -168,13 +195,14 @@ private fun DashboardTab(
                 }
                 IconButton(
                     onClick = {
-                        if (permissionsReady) viewModel.toggleMonitoring() else requestPermissions()
+                        if (desiredMonitoring) viewModel.stopMonitoring()
+                        else if (permissionsReady) viewModel.startMonitoring()
                     },
                     modifier = Modifier.testTag("toggle_monitoring_button")
                 ) {
                     Icon(
-                        if (isMonitoring) Icons.Default.PauseCircle else Icons.Default.PlayCircle,
-                        contentDescription = if (isMonitoring) "모니터링 중지" else "모니터링 시작",
+                        if (desiredMonitoring) Icons.Default.PauseCircle else Icons.Default.PlayCircle,
+                        contentDescription = if (desiredMonitoring) "모니터링 중지" else "모니터링 시작",
                         modifier = Modifier.size(36.dp)
                     )
                 }
@@ -183,22 +211,25 @@ private fun DashboardTab(
 
         if (!permissionsReady) {
             item {
-                Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer)) {
-                    Column(Modifier.padding(16.dp)) {
-                        Text("필수 권한 확인이 필요합니다", fontWeight = FontWeight.Bold)
-                        Text("활동 감지, 알림, 긴급 문자 권한이 없으면 안전 모니터링을 시작할 수 없습니다.")
-                        TextButton(onClick = requestPermissions) { Text("권한 확인") }
-                    }
-                }
+                PermissionSetupCard(
+                    smsGranted = hasSmsPermission(context),
+                    activityGranted = hasActivityPermission(context),
+                    notificationGranted = hasNotificationPermission(context),
+                    requestSmsPermission = requestSmsPermission,
+                    requestActivityPermission = requestActivityPermission,
+                    requestNotificationPermission = requestNotificationPermission
+                )
             }
         }
 
         item {
+            val hasRuntimeError = desiredMonitoring && runtimeState == MonitoringRuntimeState.ERROR
             Card(
                 colors = CardDefaults.cardColors(
-                    containerColor = when (alertState) {
-                        1 -> Color(0xFFFFF3CD)
-                        2 -> MaterialTheme.colorScheme.errorContainer
+                    containerColor = when {
+                        !permissionsReady || hasRuntimeError -> MaterialTheme.colorScheme.errorContainer
+                        alertState == 1 -> Color(0xFFFFF3CD)
+                        alertState == 2 -> MaterialTheme.colorScheme.errorContainer
                         else -> MaterialTheme.colorScheme.primaryContainer
                     }
                 ),
@@ -210,14 +241,27 @@ private fun DashboardTab(
                 ) {
                     Text(
                         when {
-                            !isMonitoring -> "모니터링 일시 중지"
+                            !permissionsReady -> "권한 설정 필요"
+                            !desiredMonitoring -> "모니터링 일시 중지"
+                            runtimeState == MonitoringRuntimeState.STARTING -> "모니터링 시작 중"
+                            runtimeState == MonitoringRuntimeState.ERROR -> "모니터링 중단됨"
                             alertState == 1 -> "안전 확인 대기 중"
                             alertState == 2 -> "긴급 문자 결과 확인 필요"
-                            else -> "정상 모니터링 중"
+                            isMonitoring -> "정상 모니터링 중"
+                            else -> "모니터링 중단됨"
                         },
                         fontSize = 20.sp,
                         fontWeight = FontWeight.Bold
                     )
+                    if (runtimeState == MonitoringRuntimeState.ERROR && serviceError.isNotBlank()) {
+                        Text(serviceError, textAlign = TextAlign.Center, fontSize = 13.sp)
+                        Spacer(Modifier.height(8.dp))
+                        if (permissionsReady) {
+                            OutlinedButton(onClick = viewModel::restartMonitoring) {
+                                Text("모니터링 다시 시작")
+                            }
+                        }
+                    }
                     Spacer(Modifier.height(12.dp))
                     Text("다음 안전 확인까지", color = MaterialTheme.colorScheme.onSurfaceVariant)
                     Text(
@@ -278,8 +322,41 @@ private fun DashboardTab(
 }
 
 @Composable
+private fun PermissionSetupCard(
+    smsGranted: Boolean,
+    activityGranted: Boolean,
+    notificationGranted: Boolean,
+    requestSmsPermission: () -> Unit,
+    requestActivityPermission: () -> Unit,
+    requestNotificationPermission: () -> Unit
+) {
+    Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer)) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text("필수 권한을 하나씩 확인해 주세요", fontWeight = FontWeight.Bold)
+            PermissionRow("긴급 문자 발송", smsGranted, requestSmsPermission)
+            PermissionRow("휴대전화 활동 감지", activityGranted, requestActivityPermission)
+            PermissionRow("사전 경고 알림", notificationGranted, requestNotificationPermission)
+        }
+    }
+}
+
+@Composable
+private fun PermissionRow(label: String, granted: Boolean, request: () -> Unit) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text("$label: ${if (granted) "허용됨" else "필요"}")
+        if (!granted) TextButton(onClick = request) { Text("허용") }
+    }
+}
+
+@Composable
 private fun ContactsTab(viewModel: LifeLinkViewModel) {
     val contacts by viewModel.contacts.collectAsState()
+    val savedAlias by viewModel.deviceAlias.collectAsState()
+    var alias by remember(savedAlias) { mutableStateOf(savedAlias) }
     var name by remember { mutableStateOf("") }
     var phone by remember { mutableStateOf("") }
 
@@ -289,7 +366,21 @@ private fun ContactsTab(viewModel: LifeLinkViewModel) {
     ) {
         item {
             Text("긴급 연락처", fontSize = 24.sp, fontWeight = FontWeight.Black)
-            Text("최대 3명에게 기기의 SIM으로 긴급 문자를 보냅니다.")
+            Text("최대 3명에게 기기의 기본 SMS SIM으로 긴급 문자를 보냅니다.")
+        }
+        item {
+            Card(modifier = Modifier.fillMaxWidth()) {
+                Column(Modifier.padding(16.dp)) {
+                    Text("문자에 표시할 사용자 이름", fontWeight = FontWeight.Bold)
+                    OutlinedTextField(
+                        value = alias,
+                        onValueChange = { alias = it.take(30) },
+                        label = { Text("예: 어머니 휴대전화") },
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    TextButton(onClick = { viewModel.updateDeviceAlias(alias) }) { Text("이름 저장") }
+                }
+            }
         }
         item {
             OutlinedTextField(
@@ -322,22 +413,27 @@ private fun ContactsTab(viewModel: LifeLinkViewModel) {
             }
         }
         items(contacts, key = { it.id }) { contact ->
-            ContactItem(contact, onDelete = { viewModel.deleteContact(contact) })
+            ContactItem(
+                contact = contact,
+                onTest = { viewModel.sendTestSms(contact) },
+                onDelete = { viewModel.deleteContact(contact) }
+            )
         }
     }
 }
 
 @Composable
-private fun ContactItem(contact: Contact, onDelete: () -> Unit) {
+private fun ContactItem(contact: Contact, onTest: () -> Unit, onDelete: () -> Unit) {
     Card(modifier = Modifier.fillMaxWidth()) {
         Row(
             modifier = Modifier.fillMaxWidth().padding(16.dp),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Column {
+            Column(Modifier.weight(1f)) {
                 Text(contact.name, fontWeight = FontWeight.Bold)
                 Text(contact.phoneNumber)
+                TextButton(onClick = onTest) { Text("테스트 문자 보내기") }
             }
             IconButton(onClick = onDelete) {
                 Icon(Icons.Default.Delete, contentDescription = "삭제", tint = MaterialTheme.colorScheme.error)
@@ -349,29 +445,35 @@ private fun ContactItem(contact: Contact, onDelete: () -> Unit) {
 @Composable
 private fun LogsTab(viewModel: LifeLinkViewModel) {
     val eventLogs by viewModel.eventLogs.collectAsState()
+    val uriHandler = LocalUriHandler.current
     var showPrivacy by remember { mutableStateOf(false) }
 
-    if (showPrivacy) PrivacyDialog(onDismiss = { showPrivacy = false })
+    if (showPrivacy) {
+        PrivacyDialog(
+            onDismiss = { showPrivacy = false },
+            onOpenPolicy = { uriHandler.openUri(PRIVACY_POLICY_URL) }
+        )
+    }
     LazyColumn(
         modifier = Modifier.fillMaxSize().padding(20.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
         item {
             Text("발송 및 동작 기록", fontSize = 24.sp, fontWeight = FontWeight.Black)
-            Text("문자 요청이 아니라 실제 발송·전달 콜백 결과를 기록합니다.")
+            Text("실제 발송·전달 콜백 결과와 재시도 상태를 기록합니다.")
         }
         item {
             Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer)) {
                 Column(Modifier.padding(16.dp)) {
                     Text("현재 전송 방식", fontWeight = FontWeight.Bold)
-                    Text("기기에 설치된 SIM을 통한 자동 SMS")
-                    Text("위치를 얻지 못하면 '위치 확인 불가'로 표시합니다.", fontSize = 13.sp)
+                    Text("기기에 설정된 기본 SMS SIM을 통한 자동 문자")
+                    Text("이 버전은 위치 정보를 수집하거나 전송하지 않습니다.", fontSize = 13.sp)
                 }
             }
         }
         item {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                TextButton(onClick = { showPrivacy = true }) { Text("개인정보 처리 안내") }
+                TextButton(onClick = { showPrivacy = true }) { Text("개인정보 처리방침") }
                 TextButton(onClick = viewModel::clearAllLogs) { Text("기록 삭제") }
             }
             HorizontalDivider()
@@ -423,50 +525,47 @@ private fun StartupSetupDialog(onComplete: () -> Unit) {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text("한 번 설정하면 휴대전화 활동을 백그라운드에서 확인합니다.")
                 Text("설정 시간 동안 활동이 없으면 먼저 알림을 표시하고, 응답이 없을 때 최대 3명의 보호자에게 SIM 문자를 보냅니다.")
-                Text("문자·활동 감지·알림 권한이 필요합니다. 위치 권한은 긴급 문자에 현재 위치를 포함할 때만 사용합니다.", fontSize = 13.sp)
+                Text("문자·활동 감지·알림 권한은 다음 화면에서 각각 설명하고 요청합니다. 위치 정보는 수집하지 않습니다.", fontSize = 13.sp)
             }
         },
-        confirmButton = {
-            Button(onClick = onComplete) { Text("설정 시작") }
-        }
+        confirmButton = { Button(onClick = onComplete) { Text("설정 시작") } }
     )
 }
 
 @Composable
-private fun PrivacyDialog(onDismiss: () -> Unit) {
+private fun PrivacyDialog(onDismiss: () -> Unit, onOpenPolicy: () -> Unit) {
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("개인정보 처리 안내") },
+        title = { Text("개인정보 처리방침") },
         text = {
             Text(
-                "보호자 이름과 전화번호, 설정, 동작 기록은 이 기기에만 저장됩니다. " +
-                    "긴급 시 현재 위치와 배터리 상태를 확인해 사용자가 등록한 보호자에게 SMS로 전달합니다. " +
-                    "현재 앱은 Firebase, Twilio, 광고, 결제 또는 외부 클라우드로 데이터를 보내지 않습니다. " +
-                    "앱 데이터는 기기 백업에서 제외됩니다. 연락처와 기록은 앱에서 삭제할 수 있고, 앱 삭제 시 모두 제거됩니다."
+                "보호자 이름과 전화번호, 설정, 최근 활동 시각, 문자 결과 기록은 이 기기에만 저장됩니다. " +
+                    "긴급 시 사용자 이름과 배터리 상태를 등록한 보호자에게 기기 SIM 문자로 전달합니다. " +
+                    "위치, Firebase, Twilio, 광고, 결제 또는 외부 클라우드는 사용하지 않습니다. " +
+                    "앱 데이터는 기기 백업에서 제외되며 앱 삭제 시 제거됩니다."
             )
         },
-        confirmButton = { TextButton(onClick = onDismiss) { Text("확인") } }
+        confirmButton = { TextButton(onClick = onDismiss) { Text("확인") } },
+        dismissButton = { TextButton(onClick = onOpenPolicy) { Text("전체 방침 열기") } }
     )
 }
 
-private fun requiredPermissions(): Array<String> = buildList {
-    add(Manifest.permission.SEND_SMS)
-    add(Manifest.permission.ACCESS_FINE_LOCATION)
-    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) add(Manifest.permission.ACTIVITY_RECOGNITION)
-    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) add(Manifest.permission.POST_NOTIFICATIONS)
-}.toTypedArray()
-
-private fun hasCorePermissions(context: Context): Boolean {
-    val smsGranted = ContextCompat.checkSelfPermission(context, Manifest.permission.SEND_SMS) ==
+private fun hasSmsPermission(context: Context): Boolean =
+    ContextCompat.checkSelfPermission(context, Manifest.permission.SEND_SMS) ==
         PackageManager.PERMISSION_GRANTED
-    val activityGranted = Build.VERSION.SDK_INT < Build.VERSION_CODES.Q ||
+
+private fun hasActivityPermission(context: Context): Boolean =
+    Build.VERSION.SDK_INT < Build.VERSION_CODES.Q ||
         ContextCompat.checkSelfPermission(context, Manifest.permission.ACTIVITY_RECOGNITION) ==
         PackageManager.PERMISSION_GRANTED
-    val notificationGranted = Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU ||
+
+private fun hasNotificationPermission(context: Context): Boolean =
+    Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU ||
         ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) ==
         PackageManager.PERMISSION_GRANTED
-    return smsGranted && activityGranted && notificationGranted
-}
+
+private fun hasCorePermissions(context: Context): Boolean =
+    hasSmsPermission(context) && hasActivityPermission(context) && hasNotificationPermission(context)
 
 private fun formatRemaining(seconds: Long): String {
     val hours = seconds / 3600
@@ -474,3 +573,6 @@ private fun formatRemaining(seconds: Long): String {
     val remaining = seconds % 60
     return String.format(Locale.US, "%02d:%02d:%02d", hours, minutes, remaining)
 }
+
+private const val PRIVACY_POLICY_URL =
+    "https://bboysilver.github.io/Lifelink-ANDROID/privacy-policy.html"
