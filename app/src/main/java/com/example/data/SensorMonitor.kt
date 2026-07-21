@@ -63,7 +63,12 @@ class SensorMonitor(
             addAction(Intent.ACTION_POWER_CONNECTED)
             addAction(Intent.ACTION_POWER_DISCONNECTED)
         }
-        context.registerReceiver(statusReceiver, filter)
+        androidx.core.content.ContextCompat.registerReceiver(
+            context,
+            statusReceiver,
+            filter,
+            androidx.core.content.ContextCompat.RECEIVER_NOT_EXPORTED
+        )
         isRegistered = true
         Log.d("SensorMonitor", "Sensing Engine Started")
     }

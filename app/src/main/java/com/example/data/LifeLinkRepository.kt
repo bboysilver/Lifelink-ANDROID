@@ -12,8 +12,6 @@ class LifeLinkRepository(private val db: AppDatabase) {
     // Preferences / Settings Keys
     companion object {
         const val KEY_MONITOR_HOURS = "monitor_hours"
-        const val KEY_SMS_MODE = "sms_mode" // "VIRTUAL", "INTENT", "DIRECT", "PREMIUM"
-        const val KEY_IS_PREMIUM = "is_premium"
         const val KEY_SETUP_COMPLETED = "setup_completed"
     }
 
@@ -30,12 +28,12 @@ class LifeLinkRepository(private val db: AppDatabase) {
     // Contacts
     suspend fun insertContact(contact: Contact) = withContext(Dispatchers.IO) {
         db.contactDao().insertContact(contact)
-        insertLog("SAFETY_INIT", "보호자 긴급 연락처를 등록했습니다", "${contact.name} (${contact.phoneNumber})")
+        insertLog("SAFETY_INIT", "보호자 긴급 연락처를 등록했습니다", "${contact.name} (${maskPhone(contact.phoneNumber)})")
     }
 
     suspend fun deleteContact(contact: Contact) = withContext(Dispatchers.IO) {
         db.contactDao().deleteContact(contact)
-        insertLog("SAFETY_INIT", "보호자 연락처를 삭제했습니다", "${contact.name} (${contact.phoneNumber})")
+        insertLog("SAFETY_INIT", "보호자 연락처를 삭제했습니다", "${contact.name} (${maskPhone(contact.phoneNumber)})")
     }
 
     suspend fun getContactCount(): Int = withContext(Dispatchers.IO) {
@@ -49,5 +47,10 @@ class LifeLinkRepository(private val db: AppDatabase) {
 
     suspend fun clearLogs() = withContext(Dispatchers.IO) {
         db.eventLogDao().clearLogs()
+    }
+
+    private fun maskPhone(phoneNumber: String): String {
+        val digits = phoneNumber.filter(Char::isDigit)
+        return if (digits.length >= 4) "****${digits.takeLast(4)}" else "****"
     }
 }
