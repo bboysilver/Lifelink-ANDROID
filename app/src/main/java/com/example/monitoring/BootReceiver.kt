@@ -15,5 +15,8 @@ class BootReceiver : BroadcastReceiver() {
         if (store.isSetupCompleted && store.desiredEnabled) {
             MonitoringService.start(context)
         }
+        if (store.isSetupCompleted && store.dailyCheckInEnabled) {
+            DailyCheckInScheduler(context).ensureScheduled()
+        }
     }
 }

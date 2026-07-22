@@ -22,6 +22,7 @@ enum class SmsSetupIssue {
     UNSUPPORTED_DEVICE,
     NO_ACTIVE_SIM,
     SIM_SELECTION_REQUIRED,
+    SIM_CHANGED,
     SIM_STATUS_UNAVAILABLE
 }
 
@@ -49,6 +50,9 @@ internal object SmsSetupResolver {
         activeLines.firstOrNull { it.subscriptionId == selectedSubscriptionId }?.let {
             return SmsSetupState.Ready(it)
         }
+        if (selectedSubscriptionId != SubscriptionManager.INVALID_SUBSCRIPTION_ID) {
+            return SmsSetupState.Blocked(SmsSetupIssue.SIM_CHANGED, activeLines)
+        }
         if (activeLines.size == 1) return SmsSetupState.Ready(activeLines.single())
         return SmsSetupState.Blocked(SmsSetupIssue.SIM_SELECTION_REQUIRED, activeLines)
     }
@@ -70,12 +74,18 @@ class SmsDeviceManager(
         } catch (error: UnsupportedOperationException) {
             return SmsSetupState.Blocked(SmsSetupIssue.SIM_STATUS_UNAVAILABLE)
         }
-        return SmsSetupResolver.resolve(
+        val state = SmsSetupResolver.resolve(
             deviceSmsCapable = true,
             phonePermissionGranted = true,
             activeLines = lines,
             selectedSubscriptionId = monitoringStore.smsSubscriptionId
         )
+        if (state is SmsSetupState.Ready &&
+            monitoringStore.smsSubscriptionId == SubscriptionManager.INVALID_SUBSCRIPTION_ID
+        ) {
+            monitoringStore.smsSubscriptionId = state.line.subscriptionId
+        }
+        return state
     }
 
     fun managerFor(subscriptionId: Int): SmsManager {
@@ -142,6 +152,7 @@ fun SmsSetupState.userMessage(): String = when (this) {
         SmsSetupIssue.UNSUPPORTED_DEVICE -> "이 기기는 이동통신사 SMS 발송을 지원하지 않습니다."
         SmsSetupIssue.NO_ACTIVE_SIM -> "활성화된 SMS 가능 SIM이 없습니다."
         SmsSetupIssue.SIM_SELECTION_REQUIRED -> "긴급 문자에 사용할 SIM을 선택해 주세요."
+        SmsSetupIssue.SIM_CHANGED -> "SIM이 변경되었습니다. 문자 회선을 다시 확인해 주세요."
         SmsSetupIssue.SIM_STATUS_UNAVAILABLE -> "SIM 상태를 확인할 수 없습니다."
     }
 }

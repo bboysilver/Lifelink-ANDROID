@@ -28,6 +28,9 @@ interface EventLogDao {
 
     @Query("DELETE FROM event_logs")
     suspend fun clearLogs()
+
+    @Query("DELETE FROM event_logs WHERE timestamp < :cutoffMs")
+    suspend fun deleteBefore(cutoffMs: Long): Int
 }
 
 @Dao

@@ -30,16 +30,33 @@ jobs:
           KEY_ALIAS: ${{ secrets.ANDROID_UPLOAD_KEY_ALIAS }}
           KEY_PASSWORD: ${{ secrets.ANDROID_UPLOAD_KEY_PASSWORD }}
         run: ./gradlew --no-daemon test lint bundleRelease
-      - name: Verify AAB signature
-        run: jarsigner -verify -verbose -certs app/build/outputs/bundle/release/app-release.aab
-      - name: Create SHA-256 checksum
+      - name: Strictly verify AAB signature and upload certificate
+        env:
+          STORE_PASSWORD: ${{ secrets.ANDROID_UPLOAD_STORE_PASSWORD }}
+          EXPECTED_UPLOAD_CERT_SHA256: ${{ vars.ANDROID_UPLOAD_CERT_SHA256 }}
+        run: |
+          set -euo pipefail
+          test -n "$EXPECTED_UPLOAD_CERT_SHA256"
+          jarsigner -verify -strict -verbose -certs \
+            -keystore "$RUNNER_TEMP/upload-keystore.jks" \
+            -storepass "$STORE_PASSWORD" \
+            app/build/outputs/bundle/release/app-release.aab
+          actual="$(keytool -printcert -jarfile app/build/outputs/bundle/release/app-release.aab | awk -F 'SHA256: ' '/SHA256:/{print $2; exit}' | tr -d ':[:space:]' | tr '[:lower:]' '[:upper:]')"
+          expected="$(printf '%s' "$EXPECTED_UPLOAD_CERT_SHA256" | tr -d ':[:space:]' | tr '[:lower:]' '[:upper:]')"
+          test "$actual" = "$expected"
+          printf '%s\n' "$actual" > app/build/outputs/bundle/release/app-release.cert.sha256
+      - name: Create AAB checksum
         run: sha256sum app/build/outputs/bundle/release/app-release.aab > app/build/outputs/bundle/release/app-release.aab.sha256
-      - name: Upload signed AAB
+      - name: Upload signed release evidence
         uses: actions/upload-artifact@v7
         with:
           name: lifelink-release-${{ github.sha }}
           path: |
             app/build/outputs/bundle/release/app-release.aab
             app/build/outputs/bundle/release/app-release.aab.sha256
+            app/build/outputs/bundle/release/app-release.cert.sha256
+            app/build/reports/tests/
+            app/build/test-results/
+            app/build/reports/lint-results*
           if-no-files-found: error
           retention-days: 30

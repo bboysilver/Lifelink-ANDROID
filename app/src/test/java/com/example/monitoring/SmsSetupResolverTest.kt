@@ -45,6 +45,13 @@ class SmsSetupResolverTest {
     }
 
     @Test
+    fun replacementSimRequiresExplicitReconfirmationEvenWhenOnlyOneRemains() {
+        val state = SmsSetupResolver.resolve(true, true, listOf(sim2), 11)
+
+        assertEquals(SmsSetupIssue.SIM_CHANGED, (state as SmsSetupState.Blocked).issue)
+        assertEquals(listOf(sim2), state.lines)
+    }
+    @Test
     fun savedActiveSimIsReady() {
         val state = SmsSetupResolver.resolve(true, true, listOf(sim1, sim2), 22)
 

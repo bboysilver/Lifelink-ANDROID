@@ -10,13 +10,16 @@ import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import com.example.data.AppDatabase
 import com.example.data.Contact
+import com.example.data.DailyCheckInPhase
 import com.example.data.EventLog
 import com.example.data.LifeLinkRepository
 import com.example.data.MonitoringRuntimeState
 import com.example.data.MonitoringStore
 import com.example.monitoring.EmergencyMessageBuilder
+import com.example.monitoring.DailyCheckInScheduler
 import com.example.monitoring.EmergencySmsSender
 import com.example.monitoring.MonitoringService
+import com.example.monitoring.SafetyNotificationCapability
 import com.example.monitoring.SmsDeviceManager
 import com.example.monitoring.SmsDispatchStore
 import com.example.monitoring.SmsQueueResult
@@ -33,6 +36,10 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import java.text.SimpleDateFormat
+import java.util.Calendar
+import java.util.Date
+import java.util.Locale
 
 class LifeLinkViewModel(application: Application) : AndroidViewModel(application) {
     private val context get() = getApplication<Application>().applicationContext
@@ -40,6 +47,7 @@ class LifeLinkViewModel(application: Application) : AndroidViewModel(application
     private val monitoringStore = MonitoringStore(context)
     private val smsDispatchStore = SmsDispatchStore(context)
     private val smsDeviceManager = SmsDeviceManager(context, monitoringStore)
+    private val dailyCheckInScheduler = DailyCheckInScheduler(context)
 
     val contacts: StateFlow<List<Contact>> = repository.allContacts.stateIn(
         scope = viewModelScope,
@@ -60,6 +68,23 @@ class LifeLinkViewModel(application: Application) : AndroidViewModel(application
     private val _monitorHours = MutableStateFlow(12)
     val monitorHours: StateFlow<Int> = _monitorHours.asStateFlow()
 
+    private val _dailyCheckInEnabled = MutableStateFlow(false)
+    val dailyCheckInEnabled: StateFlow<Boolean> = _dailyCheckInEnabled.asStateFlow()
+
+    private val _dailyCheckInHour = MutableStateFlow(9)
+    val dailyCheckInHour: StateFlow<Int> = _dailyCheckInHour.asStateFlow()
+
+    private val _dailyCheckInDue = MutableStateFlow(false)
+    val dailyCheckInDue: StateFlow<Boolean> = _dailyCheckInDue.asStateFlow()
+
+    private val _dailyScheduleText = MutableStateFlow("")
+    val dailyScheduleText: StateFlow<String> = _dailyScheduleText.asStateFlow()
+
+    private val _dailyCheckInError = MutableStateFlow("")
+    val dailyCheckInError: StateFlow<String> = _dailyCheckInError.asStateFlow()
+
+    private val _sosCountdownSeconds = MutableStateFlow(0)
+    val sosCountdownSeconds: StateFlow<Int> = _sosCountdownSeconds.asStateFlow()
     private val _remainingSeconds = MutableStateFlow(12 * 3600L)
     val remainingSeconds: StateFlow<Long> = _remainingSeconds.asStateFlow()
 
@@ -91,6 +116,7 @@ class LifeLinkViewModel(application: Application) : AndroidViewModel(application
     val setupCompleted: StateFlow<Boolean> = _setupCompleted.asStateFlow()
 
     private var tickerJob: Job? = null
+    private var sosJob: Job? = null
     private var lastObservedActivityMs = 0L
 
     init {
@@ -109,6 +135,7 @@ class LifeLinkViewModel(application: Application) : AndroidViewModel(application
             if (legacySetupCompleted) monitoringStore.completeSetup()
             _setupCompleted.value = monitoringStore.isSetupCompleted
             monitoringStore.initializeDeadlineIfMissing()
+            dailyCheckInScheduler.ensureScheduled()
             refreshSmsSetup()
             startTicker()
         }
@@ -146,6 +173,7 @@ class LifeLinkViewModel(application: Application) : AndroidViewModel(application
     }
 
     fun reportSurvival(reason: String = "사용자 직접 무사 확인") {
+
         monitoringStore.resetDeadline(reason = reason)
         if (monitoringStore.desiredEnabled) {
             try {
@@ -158,6 +186,108 @@ class LifeLinkViewModel(application: Application) : AndroidViewModel(application
             repository.insertLog("SENSOR_RESET", "활동 확인으로 안심 마감시각을 갱신했습니다.", reason)
         }
         refreshUi()
+    }
+
+    fun updateDailyCheckIn(hour: Int?) {
+        if (hour != null && !SafetyNotificationCapability.canPost(context)) {
+            val message = "알림 권한과 안전 확인 알림 채널을 켠 뒤 매일 안부 확인을 설정해 주세요."
+            monitoringStore.dailyCheckInError = message
+            logValidationError(message)
+            refreshUi()
+            return
+        }
+
+        val nextDueAtMs = monitoringStore.configureDailyCheckIn(hour)
+        dailyCheckInScheduler.ensureScheduled()
+        viewModelScope.launch {
+            repository.insertLog(
+                "SETTINGS_CHANGED",
+                if (hour == null) {
+                    "매일 안부 확인을 사용하지 않습니다."
+                } else {
+                    dailyScheduleMessage(nextDueAtMs)
+                }
+            )
+        }
+        refreshUi()
+    }
+
+    fun reportDailySafe() {
+        val completedDueAtMs = monitoringStore.confirmDailyCheckIn()
+        if (completedDueAtMs == null) {
+            logValidationError("아직 오늘의 안부 확인 시간이 아닙니다.")
+            return
+        }
+        dailyCheckInScheduler.ensureScheduled()
+        MonitoringService.cancelDailyNotification(context)
+        reportSurvival("매일 안부 확인에서 괜찮음 응답")
+    }
+
+    fun requestDailyHelp() {
+        if (beginSosCountdown()) {
+            monitoringStore.confirmDailyCheckIn()
+            refreshUi()
+        }
+    }
+
+    fun startSosCountdown() {
+        beginSosCountdown()
+    }
+
+    private fun beginSosCountdown(): Boolean {
+        if (contacts.value.isEmpty()) {
+            logValidationError("SOS를 보낼 보호자 연락처를 먼저 등록해 주세요.")
+            return false
+        }
+        if (
+            ContextCompat.checkSelfPermission(context, Manifest.permission.SEND_SMS) !=
+            PackageManager.PERMISSION_GRANTED || readySmsLineOrLog() == null
+        ) return false
+        if (sosJob?.isActive == true) return false
+        val sendAtMs = System.currentTimeMillis() + SOS_COUNTDOWN_SECONDS * 1_000L
+        if (monitoringStore.beginSos(sendAtMs) != sendAtMs) {
+            logValidationError("이미 처리 중인 SOS 요청이 있습니다.")
+            return false
+        }
+        try {
+            // Start immediately so the persisted countdown survives the UI leaving the foreground.
+            MonitoringService.triggerSos(context)
+        } catch (error: RuntimeException) {
+            monitoringStore.clearSos()
+            monitoringStore.markServiceError(error.message ?: "SOS 요청을 전달하지 못했습니다.")
+            viewModelScope.launch {
+                repository.insertLog("SYSTEM_ERROR", "SOS 요청을 전달하지 못했습니다.", error.message.orEmpty())
+            }
+            return false
+        }
+
+        sosJob = viewModelScope.launch {
+            for (seconds in SOS_COUNTDOWN_SECONDS downTo 1) {
+                _sosCountdownSeconds.value = seconds
+                delay(1_000)
+            }
+            _sosCountdownSeconds.value = 0
+            if (monitoringStore.sosEventMs > 0L) {
+                repository.insertLog("SOS_REQUESTED", "사용자가 SOS 문자 발송을 요청했습니다.")
+            }
+        }
+        return true
+    }
+
+    fun cancelSosCountdown() {
+        val cancelled = monitoringStore.cancelPendingSos()
+        sosJob?.cancel()
+        _sosCountdownSeconds.value = 0
+        viewModelScope.launch {
+            repository.insertLog(
+                if (cancelled) "SOS_CANCELLED" else "SOS_CANCEL_TOO_LATE",
+                if (cancelled) {
+                    "사용자가 SOS 요청을 취소했습니다."
+                } else {
+                    "이미 문자 발송이 시작되어 SOS를 취소할 수 없습니다."
+                }
+            )
+        }
     }
 
     fun updateMonitorHours(hours: Int) {
@@ -308,6 +438,10 @@ class LifeLinkViewModel(application: Application) : AndroidViewModel(application
         tickerJob?.cancel()
         tickerJob = viewModelScope.launch {
             while (true) {
+                if (_sosCountdownSeconds.value > 0 && monitoringStore.sosEventMs <= 0L) {
+                    sosJob?.cancel()
+                    _sosCountdownSeconds.value = 0
+                }
                 refreshUi()
                 delay(1_000)
             }
@@ -316,6 +450,17 @@ class LifeLinkViewModel(application: Application) : AndroidViewModel(application
 
     private fun refreshUi() {
         val snapshot = monitoringStore.snapshot()
+        _dailyCheckInEnabled.value = monitoringStore.dailyCheckInEnabled
+        _dailyCheckInHour.value = monitoringStore.dailyCheckInHour
+        _dailyCheckInDue.value = monitoringStore.dailyCheckInStatus().phase.let {
+            it == DailyCheckInPhase.DUE || it == DailyCheckInPhase.OVERDUE
+        }
+        _dailyScheduleText.value = if (monitoringStore.dailyCheckInEnabled) {
+            dailyScheduleMessage(monitoringStore.dailyNextDueAtMs)
+        } else {
+            ""
+        }
+        _dailyCheckInError.value = monitoringStore.dailyCheckInError
         _remainingSeconds.value = snapshot.remainingSeconds
         _isMonitoring.value = snapshot.isRunning
         _desiredMonitoring.value = snapshot.desiredEnabled
@@ -332,6 +477,28 @@ class LifeLinkViewModel(application: Application) : AndroidViewModel(application
                 _sensorPulse.value = false
             }
         }
+    }
+
+    private fun dailyScheduleMessage(dueAtMs: Long): String {
+        if (dueAtMs <= 0L) return "다음 안부 확인 시각을 준비하고 있습니다."
+        val now = Calendar.getInstance()
+        val due = Calendar.getInstance().apply { timeInMillis = dueAtMs }
+        val tomorrow = Calendar.getInstance().apply { add(Calendar.DAY_OF_YEAR, 1) }
+        val prefix = when {
+            sameLocalDay(now, due) -> "오늘"
+            sameLocalDay(tomorrow, due) -> "내일부터"
+            else -> SimpleDateFormat("M월 d일부터", Locale.KOREA).format(Date(dueAtMs))
+        }
+        return "$prefix 매일 ${due.get(Calendar.HOUR_OF_DAY)}시에 확인합니다."
+    }
+
+    private fun sameLocalDay(first: Calendar, second: Calendar): Boolean =
+        first.get(Calendar.ERA) == second.get(Calendar.ERA) &&
+            first.get(Calendar.YEAR) == second.get(Calendar.YEAR) &&
+            first.get(Calendar.DAY_OF_YEAR) == second.get(Calendar.DAY_OF_YEAR)
+
+    private companion object {
+        const val SOS_COUNTDOWN_SECONDS = 5
     }
 }
 

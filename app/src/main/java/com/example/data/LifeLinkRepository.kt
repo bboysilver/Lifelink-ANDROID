@@ -49,6 +49,10 @@ class LifeLinkRepository(private val db: AppDatabase) {
         db.eventLogDao().clearLogs()
     }
 
+    suspend fun deleteLogsBefore(cutoffMs: Long): Int = withContext(Dispatchers.IO) {
+        db.eventLogDao().deleteBefore(cutoffMs)
+    }
+
     private fun maskPhone(phoneNumber: String): String {
         val digits = phoneNumber.filter(Char::isDigit)
         return if (digits.length >= 4) "****${digits.takeLast(4)}" else "****"

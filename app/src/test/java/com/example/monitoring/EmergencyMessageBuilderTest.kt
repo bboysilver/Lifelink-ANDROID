@@ -34,4 +34,22 @@ class EmergencyMessageBuilderTest {
         assertTrue(message.contains("테스트"))
         assertTrue(message.contains("긴급 상황이 아닙니다"))
     }
+
+    @Test
+    fun sosMessageIsClearlyIdentifiedAndIncludesTime() {
+        val message = EmergencyMessageBuilder.buildSos("어머니", 1_700_000_000_000L)
+
+        assertTrue(message.contains("SOS"))
+        assertTrue(message.contains("도움 요청"))
+        assertTrue(message.contains("요청 시각"))
+    }
+
+    @Test
+    fun missedDailyCheckInMessageDoesNotClaimAnEmergencyService() {
+        val message = EmergencyMessageBuilder.buildDailyCheckInMissed("아버지")
+
+        assertTrue(message.contains("안부 확인"))
+        assertTrue(message.contains("응답하지 않았습니다"))
+        assertTrue(message.contains("직접 연락"))
+    }
 }

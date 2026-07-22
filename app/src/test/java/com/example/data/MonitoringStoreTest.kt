@@ -76,4 +76,55 @@ class MonitoringStoreTest {
         assertFalse(store.wasPreAlerted(store.deadlineMs))
         assertFalse(store.wasEmergencyDispatched(store.deadlineMs))
     }
+
+    @Test
+    fun dailyCheckInStartsAtTheNextFutureOccurrenceAndSurvivesRecreation() {
+        val nowMs = 1_721_659_200_000L
+
+        val dueAtMs = MonitoringStore(context).configureDailyCheckIn(hour = 9, nowMs = nowMs)
+        val restored = MonitoringStore(context)
+
+        assertTrue(restored.dailyCheckInEnabled)
+        assertEquals(9, restored.dailyCheckInHour)
+        assertEquals(dueAtMs, restored.dailyNextDueAtMs)
+        assertEquals(DailyCheckInPhase.UPCOMING, restored.dailyCheckInStatus(nowMs).phase)
+        assertTrue(dueAtMs > nowMs)
+    }
+
+    @Test
+    fun ordinaryEarlyActivityCannotCompleteDailyCheckIn() {
+        val store = MonitoringStore(context)
+        val dueAtMs = store.configureDailyCheckIn(hour = 18, nowMs = 1_000L)
+
+        assertEquals(null, store.confirmDailyCheckIn(nowMs = dueAtMs - 1L))
+        assertEquals(dueAtMs, store.dailyNextDueAtMs)
+    }
+
+    @Test
+    fun confirmingDueCheckInAdvancesToANewDueEvent() {
+        val store = MonitoringStore(context)
+        val dueAtMs = store.configureDailyCheckIn(hour = 18, nowMs = 1_000L)
+        store.markDailyCheckInPrompted(dueAtMs)
+
+        assertEquals(dueAtMs, store.confirmDailyCheckIn(nowMs = dueAtMs))
+        assertTrue(store.dailyNextDueAtMs > dueAtMs)
+        assertFalse(store.wasDailyCheckInPrompted(store.dailyNextDueAtMs))
+    }
+
+    @Test
+    fun pendingSosCanBeCancelledBeforeButNotAfterDispatchClaim() {
+        val store = MonitoringStore(context)
+        store.beginSos(1_000L)
+
+        assertTrue(store.cancelPendingSos())
+        assertEquals(0L, store.sosEventMs)
+
+        store.beginSos(2_000L)
+        assertEquals(2_000L, store.claimPendingSos(nowMs = 2_000L))
+        assertFalse(store.cancelPendingSos())
+        assertEquals(2_000L, store.activeSosEventMs)
+
+        store.completeActiveSos(2_000L)
+        assertEquals(0L, store.sosEventMs)
+    }
 }
