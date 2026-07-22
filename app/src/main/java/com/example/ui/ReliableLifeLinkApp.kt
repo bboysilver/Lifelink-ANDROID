@@ -212,6 +212,10 @@ private fun DashboardTab(
     val monitorHours by viewModel.monitorHours.collectAsState()
     val dailyCheckInEnabled by viewModel.dailyCheckInEnabled.collectAsState()
     val dailyCheckInHour by viewModel.dailyCheckInHour.collectAsState()
+    val dailyCheckInDue by viewModel.dailyCheckInDue.collectAsState()
+    val dailyScheduleText by viewModel.dailyScheduleText.collectAsState()
+    val dailyCheckInError by viewModel.dailyCheckInError.collectAsState()
+    val contacts by viewModel.contacts.collectAsState()
     val smsReady = smsSetupState is SmsSetupState.Ready
     val canStart = permissionsReady && smsReady
 
@@ -333,7 +337,11 @@ private fun DashboardTab(
         item {
             Button(
                 onClick = viewModel::startSosCountdown,
-                enabled = isMonitoring && smsReady,
+                enabled = SosEligibility.canStart(
+                    smsReady = smsReady,
+                    hasEmergencyContacts = contacts.isNotEmpty(),
+                    smsPermissionGranted = hasSmsPermission(context)
+                ),
                 colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error),
                 modifier = Modifier.fillMaxWidth().height(64.dp).testTag("sos_button")
             ) {
@@ -347,6 +355,16 @@ private fun DashboardTab(
                 Column(Modifier.padding(16.dp)) {
                     Text("매일 안부 확인", fontWeight = FontWeight.Bold)
                     Text("정한 시각부터 2시간 안에 응답하지 않으면 보호자에게 알립니다.", fontSize = 13.sp)
+                    if (dailyScheduleText.isNotBlank()) {
+                        Text(dailyScheduleText, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                    }
+                    if (dailyCheckInError.isNotBlank()) {
+                        Text(
+                            dailyCheckInError,
+                            color = MaterialTheme.colorScheme.error,
+                            fontSize = 13.sp
+                        )
+                    }
                     Spacer(Modifier.height(10.dp))
                     LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         item {
@@ -367,8 +385,14 @@ private fun DashboardTab(
                     if (dailyCheckInEnabled) {
                         OutlinedButton(
                             onClick = viewModel::reportDailySafe,
+                            enabled = dailyCheckInDue,
                             modifier = Modifier.fillMaxWidth().height(56.dp)
-                        ) { Text("오늘도 괜찮아요", fontWeight = FontWeight.Bold) }
+                        ) {
+                            Text(
+                                if (dailyCheckInDue) "오늘도 괜찮아요" else "안부 확인 시각을 기다리는 중",
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
                     }
                 }
             }

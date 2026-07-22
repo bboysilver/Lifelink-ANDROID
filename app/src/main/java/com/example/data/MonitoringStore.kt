@@ -56,17 +56,28 @@ class MonitoringStore(context: Context) {
         get() = preferences.getInt(KEY_SMS_SUBSCRIPTION_ID, INVALID_SUBSCRIPTION_ID)
         set(value) = preferences.edit().putInt(KEY_SMS_SUBSCRIPTION_ID, value).apply()
 
-    var dailyCheckInEnabled: Boolean
+    val dailyCheckInEnabled: Boolean
         get() = preferences.getBoolean(KEY_DAILY_CHECK_IN_ENABLED, false)
-        set(value) = preferences.edit().putBoolean(KEY_DAILY_CHECK_IN_ENABLED, value).apply()
 
-    var dailyCheckInHour: Int
+    val dailyCheckInHour: Int
         get() = preferences.getInt(KEY_DAILY_CHECK_IN_HOUR, DailyCheckInCalculator.DEFAULT_HOUR)
             .coerceIn(0, 23)
-        set(value) = preferences.edit().putInt(KEY_DAILY_CHECK_IN_HOUR, value.coerceIn(0, 23)).apply()
+
+    val dailyNextDueAtMs: Long
+        get() = preferences.getLong(KEY_DAILY_NEXT_DUE_AT_MS, 0L)
+
+    var dailyCheckInError: String
+        get() = preferences.getString(KEY_DAILY_CHECK_IN_ERROR, "").orEmpty()
+        set(value) = preferences.edit().putString(KEY_DAILY_CHECK_IN_ERROR, value).apply()
 
     val pendingSosEventMs: Long
         get() = preferences.getLong(KEY_PENDING_SOS_EVENT_MS, 0L)
+
+    val activeSosEventMs: Long
+        get() = preferences.getLong(KEY_ACTIVE_SOS_EVENT_MS, 0L)
+
+    val sosEventMs: Long
+        get() = activeSosEventMs.takeIf { it > 0L } ?: pendingSosEventMs
 
     val isSetupCompleted: Boolean
         get() = preferences.getBoolean(KEY_SETUP_COMPLETED, false)
@@ -162,41 +173,133 @@ class MonitoringStore(context: Context) {
         DailyCheckInCalculator.status(
             nowMs = nowMs,
             enabled = dailyCheckInEnabled,
-            hour = dailyCheckInHour,
-            lastConfirmedDayStartMs = preferences.getLong(KEY_DAILY_CONFIRMED_DAY_START_MS, 0L)
+            nextDueAtMs = dailyNextDueAtMs
         )
 
-    fun markDailyCheckInPrompted(dayStartMs: Long) {
-        preferences.edit().putLong(KEY_DAILY_PROMPTED_DAY_START_MS, dayStartMs).apply()
+    @SuppressLint("ApplySharedPref")
+    fun configureDailyCheckIn(
+        hour: Int?,
+        nowMs: Long = System.currentTimeMillis()
+    ): Long {
+        if (hour == null) {
+            preferences.edit()
+                .putBoolean(KEY_DAILY_CHECK_IN_ENABLED, false)
+                .remove(KEY_DAILY_NEXT_DUE_AT_MS)
+                .remove(KEY_DAILY_PROMPTED_DUE_AT_MS)
+                .remove(KEY_DAILY_ALERTED_DUE_AT_MS)
+                .remove(KEY_DAILY_CHECK_IN_ERROR)
+                .commit()
+            return 0L
+        }
+
+        val normalizedHour = hour.coerceIn(0, 23)
+        val nextDueAtMs = DailyCheckInCalculator.nextDueAt(nowMs, normalizedHour)
+        preferences.edit()
+            .putBoolean(KEY_DAILY_CHECK_IN_ENABLED, true)
+            .putInt(KEY_DAILY_CHECK_IN_HOUR, normalizedHour)
+            .putLong(KEY_DAILY_NEXT_DUE_AT_MS, nextDueAtMs)
+            .remove(KEY_DAILY_PROMPTED_DUE_AT_MS)
+            .remove(KEY_DAILY_ALERTED_DUE_AT_MS)
+            .remove(KEY_DAILY_CHECK_IN_ERROR)
+            .remove(KEY_DAILY_CONFIRMED_DAY_START_MS)
+            .remove(KEY_DAILY_PROMPTED_DAY_START_MS)
+            .remove(KEY_DAILY_ALERTED_DAY_START_MS)
+            .commit()
+        return nextDueAtMs
     }
-
-    fun wasDailyCheckInPrompted(dayStartMs: Long): Boolean =
-        preferences.getLong(KEY_DAILY_PROMPTED_DAY_START_MS, 0L) == dayStartMs
-
-    fun confirmDailyCheckIn(nowMs: Long = System.currentTimeMillis()): Long {
-        val dayStartMs = dailyCheckInStatus(nowMs).dayStartMs
-        preferences.edit().putLong(KEY_DAILY_CONFIRMED_DAY_START_MS, dayStartMs).apply()
-        return dayStartMs
-    }
-
-    fun markDailyCheckInAlerted(dayStartMs: Long) {
-        preferences.edit().putLong(KEY_DAILY_ALERTED_DAY_START_MS, dayStartMs).apply()
-    }
-
-    fun wasDailyCheckInAlerted(dayStartMs: Long): Boolean =
-        preferences.getLong(KEY_DAILY_ALERTED_DAY_START_MS, 0L) == dayStartMs
 
     @SuppressLint("ApplySharedPref")
-    fun beginSos(nowMs: Long = System.currentTimeMillis()): Long {
-        if (pendingSosEventMs > 0L) return pendingSosEventMs
-        preferences.edit().putLong(KEY_PENDING_SOS_EVENT_MS, nowMs).commit()
+    fun ensureDailyCheckInScheduled(nowMs: Long = System.currentTimeMillis()): Long {
+        if (!dailyCheckInEnabled) return 0L
+        if (dailyNextDueAtMs > 0L) return dailyNextDueAtMs
+        val dueAtMs = DailyCheckInCalculator.nextDueAt(nowMs, dailyCheckInHour)
+        preferences.edit().putLong(KEY_DAILY_NEXT_DUE_AT_MS, dueAtMs).commit()
+        return dueAtMs
+    }
+
+    @SuppressLint("ApplySharedPref")
+    fun deferDailyCheckInToNow(nowMs: Long = System.currentTimeMillis()): Long {
+        preferences.edit()
+            .putLong(KEY_DAILY_NEXT_DUE_AT_MS, nowMs)
+            .remove(KEY_DAILY_PROMPTED_DUE_AT_MS)
+            .remove(KEY_DAILY_ALERTED_DUE_AT_MS)
+            .commit()
         return nowMs
     }
 
-    fun clearPendingSos() {
-        preferences.edit().remove(KEY_PENDING_SOS_EVENT_MS).apply()
+    fun markDailyCheckInPrompted(dueAtMs: Long) {
+        preferences.edit().putLong(KEY_DAILY_PROMPTED_DUE_AT_MS, dueAtMs).apply()
     }
 
+    fun wasDailyCheckInPrompted(dueAtMs: Long): Boolean =
+        preferences.getLong(KEY_DAILY_PROMPTED_DUE_AT_MS, 0L) == dueAtMs
+
+    fun confirmDailyCheckIn(nowMs: Long = System.currentTimeMillis()): Long? {
+        val status = dailyCheckInStatus(nowMs)
+        if (!status.needsResponse || status.dueAtMs <= 0L) return null
+        val advanced = advanceDailyCheckIn(status.dueAtMs)
+        if (advanced) dailyCheckInError = ""
+        return status.dueAtMs.takeIf { advanced }
+    }
+
+    fun markDailyCheckInAlerted(dueAtMs: Long) {
+        preferences.edit().putLong(KEY_DAILY_ALERTED_DUE_AT_MS, dueAtMs).apply()
+    }
+
+    fun wasDailyCheckInAlerted(dueAtMs: Long): Boolean =
+        preferences.getLong(KEY_DAILY_ALERTED_DUE_AT_MS, 0L) == dueAtMs
+
+    @SuppressLint("ApplySharedPref")
+    fun advanceDailyCheckIn(completedDueAtMs: Long): Boolean {
+        if (!dailyCheckInEnabled || dailyNextDueAtMs != completedDueAtMs) return false
+        val nextDueAtMs = DailyCheckInCalculator.nextDueAfter(completedDueAtMs, dailyCheckInHour)
+        return preferences.edit()
+            .putLong(KEY_DAILY_NEXT_DUE_AT_MS, nextDueAtMs)
+            .remove(KEY_DAILY_PROMPTED_DUE_AT_MS)
+            .remove(KEY_DAILY_ALERTED_DUE_AT_MS)
+            .commit()
+    }
+    @SuppressLint("ApplySharedPref")
+    fun beginSos(nowMs: Long = System.currentTimeMillis()): Long = synchronized(SOS_LOCK) {
+        if (sosEventMs > 0L) return@synchronized sosEventMs
+        preferences.edit().putLong(KEY_PENDING_SOS_EVENT_MS, nowMs).commit()
+        nowMs
+    }
+
+    @SuppressLint("ApplySharedPref")
+    fun claimPendingSos(nowMs: Long = System.currentTimeMillis()): Long? = synchronized(SOS_LOCK) {
+        if (activeSosEventMs > 0L) return@synchronized activeSosEventMs
+        val pending = pendingSosEventMs
+        if (pending <= 0L || pending > nowMs) return@synchronized null
+        preferences.edit()
+            .remove(KEY_PENDING_SOS_EVENT_MS)
+            .putLong(KEY_ACTIVE_SOS_EVENT_MS, pending)
+            .commit()
+        pending
+    }
+
+    @SuppressLint("ApplySharedPref")
+    fun cancelPendingSos(): Boolean = synchronized(SOS_LOCK) {
+        if (pendingSosEventMs <= 0L) return@synchronized false
+        preferences.edit().remove(KEY_PENDING_SOS_EVENT_MS).commit()
+    }
+
+    fun completeActiveSos(eventMs: Long) {
+        synchronized(SOS_LOCK) {
+            if (activeSosEventMs == eventMs) {
+                preferences.edit().remove(KEY_ACTIVE_SOS_EVENT_MS).apply()
+            }
+        }
+    }
+
+    fun clearSos() {
+        synchronized(SOS_LOCK) {
+            preferences.edit()
+                .remove(KEY_PENDING_SOS_EVENT_MS)
+                .remove(KEY_ACTIVE_SOS_EVENT_MS)
+                .apply()
+        }
+    }
     fun markPreAlert(deadlineMs: Long) {
         preferences.edit().putLong(KEY_PRE_ALERT_DEADLINE_MS, deadlineMs).apply()
     }
@@ -275,13 +378,19 @@ class MonitoringStore(context: Context) {
         private const val KEY_SMS_SUBSCRIPTION_ID = "sms_subscription_id"
         private const val KEY_DAILY_CHECK_IN_ENABLED = "daily_check_in_enabled"
         private const val KEY_DAILY_CHECK_IN_HOUR = "daily_check_in_hour"
+        private const val KEY_DAILY_NEXT_DUE_AT_MS = "daily_next_due_at_ms"
+        private const val KEY_DAILY_PROMPTED_DUE_AT_MS = "daily_prompted_due_at_ms"
+        private const val KEY_DAILY_ALERTED_DUE_AT_MS = "daily_alerted_due_at_ms"
+        private const val KEY_DAILY_CHECK_IN_ERROR = "daily_check_in_error"
         private const val KEY_DAILY_CONFIRMED_DAY_START_MS = "daily_confirmed_day_start_ms"
         private const val KEY_DAILY_PROMPTED_DAY_START_MS = "daily_prompted_day_start_ms"
         private const val KEY_DAILY_ALERTED_DAY_START_MS = "daily_alerted_day_start_ms"
         private const val KEY_PENDING_SOS_EVENT_MS = "pending_sos_event_ms"
+        private const val KEY_ACTIVE_SOS_EVENT_MS = "active_sos_event_ms"
         private const val INVALID_SUBSCRIPTION_ID = -1
         private const val DEFAULT_DEVICE_ALIAS = "라이프링크 사용자"
         const val HEARTBEAT_TIMEOUT_MS = 45_000L
         const val START_TIMEOUT_MS = 30_000L
+        private val SOS_LOCK = Any()
     }
 }

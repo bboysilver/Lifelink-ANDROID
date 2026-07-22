@@ -1,12 +1,12 @@
 package com.example.data
 
 import java.util.Calendar
+import java.util.TimeZone
 
-enum class DailyCheckInPhase { DISABLED, UPCOMING, DUE, OVERDUE, COMPLETE }
+enum class DailyCheckInPhase { DISABLED, UPCOMING, DUE, OVERDUE }
 
 data class DailyCheckInStatus(
     val phase: DailyCheckInPhase,
-    val dayStartMs: Long,
     val dueAtMs: Long,
     val overdueAtMs: Long
 ) {
@@ -18,30 +18,46 @@ object DailyCheckInCalculator {
     const val DEFAULT_HOUR = 9
     const val RESPONSE_WINDOW_MS = 2 * 60 * 60 * 1_000L
 
-    fun status(
+    fun nextDueAt(
         nowMs: Long,
-        enabled: Boolean,
         hour: Int,
-        lastConfirmedDayStartMs: Long,
-        timeZoneId: String = java.util.TimeZone.getDefault().id
-    ): DailyCheckInStatus {
-        val calendar = Calendar.getInstance(java.util.TimeZone.getTimeZone(timeZoneId)).apply {
+        timeZoneId: String = TimeZone.getDefault().id
+    ): Long {
+        val calendar = Calendar.getInstance(TimeZone.getTimeZone(timeZoneId)).apply {
             timeInMillis = nowMs
-            set(Calendar.HOUR_OF_DAY, 0)
+            set(Calendar.HOUR_OF_DAY, hour.coerceIn(0, 23))
+            set(Calendar.MINUTE, 0)
+            set(Calendar.SECOND, 0)
+            set(Calendar.MILLISECOND, 0)
+            if (timeInMillis <= nowMs) add(Calendar.DAY_OF_YEAR, 1)
+        }
+        return calendar.timeInMillis
+    }
+
+    fun nextDueAfter(
+        dueAtMs: Long,
+        hour: Int,
+        timeZoneId: String = TimeZone.getDefault().id
+    ): Long {
+        val calendar = Calendar.getInstance(TimeZone.getTimeZone(timeZoneId)).apply {
+            timeInMillis = dueAtMs
+            add(Calendar.DAY_OF_YEAR, 1)
+            set(Calendar.HOUR_OF_DAY, hour.coerceIn(0, 23))
             set(Calendar.MINUTE, 0)
             set(Calendar.SECOND, 0)
             set(Calendar.MILLISECOND, 0)
         }
-        val dayStartMs = calendar.timeInMillis
-        val dueAtMs = dayStartMs + hour.coerceIn(0, 23) * 60L * 60L * 1_000L
-        val overdueAtMs = dueAtMs + RESPONSE_WINDOW_MS
+        return calendar.timeInMillis
+    }
+
+    fun status(nowMs: Long, enabled: Boolean, nextDueAtMs: Long): DailyCheckInStatus {
+        val overdueAtMs = nextDueAtMs + RESPONSE_WINDOW_MS
         val phase = when {
             !enabled -> DailyCheckInPhase.DISABLED
-            lastConfirmedDayStartMs == dayStartMs -> DailyCheckInPhase.COMPLETE
-            nowMs < dueAtMs -> DailyCheckInPhase.UPCOMING
+            nextDueAtMs <= 0L || nowMs < nextDueAtMs -> DailyCheckInPhase.UPCOMING
             nowMs < overdueAtMs -> DailyCheckInPhase.DUE
             else -> DailyCheckInPhase.OVERDUE
         }
-        return DailyCheckInStatus(phase, dayStartMs, dueAtMs, overdueAtMs)
+        return DailyCheckInStatus(phase, nextDueAtMs, overdueAtMs)
     }
 }

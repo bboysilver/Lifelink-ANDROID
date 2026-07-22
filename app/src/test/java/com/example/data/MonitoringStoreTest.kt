@@ -78,34 +78,53 @@ class MonitoringStoreTest {
     }
 
     @Test
-    fun dailyCheckInSettingsAndConfirmationSurviveRecreation() {
-        val store = MonitoringStore(context)
-        store.dailyCheckInEnabled = true
-        store.dailyCheckInHour = 18
-        val confirmedDay = store.confirmDailyCheckIn(nowMs = 1_700_000_000_000L)
+    fun dailyCheckInStartsAtTheNextFutureOccurrenceAndSurvivesRecreation() {
+        val nowMs = 1_721_659_200_000L
 
+        val dueAtMs = MonitoringStore(context).configureDailyCheckIn(hour = 9, nowMs = nowMs)
         val restored = MonitoringStore(context)
 
         assertTrue(restored.dailyCheckInEnabled)
-        assertEquals(18, restored.dailyCheckInHour)
-        assertEquals(
-            DailyCheckInPhase.COMPLETE,
-            restored.dailyCheckInStatus(confirmedDay + 20 * HOUR_MS).phase
-        )
+        assertEquals(9, restored.dailyCheckInHour)
+        assertEquals(dueAtMs, restored.dailyNextDueAtMs)
+        assertEquals(DailyCheckInPhase.UPCOMING, restored.dailyCheckInStatus(nowMs).phase)
+        assertTrue(dueAtMs > nowMs)
     }
 
     @Test
-    fun pendingSosUsesOneStableEventUntilCleared() {
+    fun ordinaryEarlyActivityCannotCompleteDailyCheckIn() {
         val store = MonitoringStore(context)
+        val dueAtMs = store.configureDailyCheckIn(hour = 18, nowMs = 1_000L)
 
-        assertEquals(1_000L, store.beginSos(1_000L))
-        assertEquals(1_000L, store.beginSos(2_000L))
-
-        store.clearPendingSos()
-        assertEquals(0L, store.pendingSosEventMs)
+        assertEquals(null, store.confirmDailyCheckIn(nowMs = dueAtMs - 1L))
+        assertEquals(dueAtMs, store.dailyNextDueAtMs)
     }
 
-    private companion object {
-        const val HOUR_MS = 60L * 60L * 1_000L
+    @Test
+    fun confirmingDueCheckInAdvancesToANewDueEvent() {
+        val store = MonitoringStore(context)
+        val dueAtMs = store.configureDailyCheckIn(hour = 18, nowMs = 1_000L)
+        store.markDailyCheckInPrompted(dueAtMs)
+
+        assertEquals(dueAtMs, store.confirmDailyCheckIn(nowMs = dueAtMs))
+        assertTrue(store.dailyNextDueAtMs > dueAtMs)
+        assertFalse(store.wasDailyCheckInPrompted(store.dailyNextDueAtMs))
+    }
+
+    @Test
+    fun pendingSosCanBeCancelledBeforeButNotAfterDispatchClaim() {
+        val store = MonitoringStore(context)
+        store.beginSos(1_000L)
+
+        assertTrue(store.cancelPendingSos())
+        assertEquals(0L, store.sosEventMs)
+
+        store.beginSos(2_000L)
+        assertEquals(2_000L, store.claimPendingSos(nowMs = 2_000L))
+        assertFalse(store.cancelPendingSos())
+        assertEquals(2_000L, store.activeSosEventMs)
+
+        store.completeActiveSos(2_000L)
+        assertEquals(0L, store.sosEventMs)
     }
 }

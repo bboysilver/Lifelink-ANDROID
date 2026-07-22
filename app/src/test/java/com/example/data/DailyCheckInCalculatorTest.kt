@@ -4,47 +4,41 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import java.util.Calendar
+import java.util.TimeZone
 
 class DailyCheckInCalculatorTest {
-    private val dayStartMs = 1_700_000_000_000L
-
     @Test
-    fun disabledScheduleNeverRequestsAResponse() {
-        val status = DailyCheckInCalculator.status(
-            nowMs = dayStartMs + 12 * HOUR_MS,
-            enabled = false,
-            hour = 9,
-            lastConfirmedDayStartMs = 0L,
-            timeZoneId = "UTC"
-        )
+    fun selectingAnAlreadyPassedHourStartsTomorrow() {
+        val nowMs = utcTime(2026, Calendar.JULY, 22, 14)
 
-        assertEquals(DailyCheckInPhase.DISABLED, status.phase)
-        assertFalse(status.needsResponse)
+        val dueAtMs = DailyCheckInCalculator.nextDueAt(nowMs, hour = 9, timeZoneId = "UTC")
+
+        assertEquals(utcTime(2026, Calendar.JULY, 23, 9), dueAtMs)
     }
 
     @Test
-    fun dueAndOverdueWindowsAreDistinct() {
-        val actualDayStart = DailyCheckInCalculator.status(
-            nowMs = dayStartMs,
-            enabled = true,
-            hour = 9,
-            lastConfirmedDayStartMs = 0L,
-            timeZoneId = "UTC"
-        ).dayStartMs
+    fun selectingAFutureHourStartsToday() {
+        val nowMs = utcTime(2026, Calendar.JULY, 22, 14)
+
+        val dueAtMs = DailyCheckInCalculator.nextDueAt(nowMs, hour = 18, timeZoneId = "UTC")
+
+        assertEquals(utcTime(2026, Calendar.JULY, 22, 18), dueAtMs)
+    }
+
+    @Test
+    fun dueAndOverdueWindowsUseTheStoredDueTime() {
+        val dueAtMs = utcTime(2026, Calendar.JULY, 22, 9)
 
         val due = DailyCheckInCalculator.status(
-            nowMs = actualDayStart + 9 * HOUR_MS,
+            nowMs = dueAtMs,
             enabled = true,
-            hour = 9,
-            lastConfirmedDayStartMs = 0L,
-            timeZoneId = "UTC"
+            nextDueAtMs = dueAtMs
         )
         val overdue = DailyCheckInCalculator.status(
-            nowMs = actualDayStart + 11 * HOUR_MS,
+            nowMs = dueAtMs + DailyCheckInCalculator.RESPONSE_WINDOW_MS,
             enabled = true,
-            hour = 9,
-            lastConfirmedDayStartMs = 0L,
-            timeZoneId = "UTC"
+            nextDueAtMs = dueAtMs
         )
 
         assertEquals(DailyCheckInPhase.DUE, due.phase)
@@ -53,26 +47,20 @@ class DailyCheckInCalculatorTest {
     }
 
     @Test
-    fun confirmationCompletesOnlyTheCurrentDay() {
-        val initial = DailyCheckInCalculator.status(
-            nowMs = dayStartMs,
-            enabled = true,
-            hour = 9,
-            lastConfirmedDayStartMs = 0L,
-            timeZoneId = "UTC"
-        )
-        val confirmed = DailyCheckInCalculator.status(
-            nowMs = initial.dayStartMs + 12 * HOUR_MS,
-            enabled = true,
-            hour = 9,
-            lastConfirmedDayStartMs = initial.dayStartMs,
-            timeZoneId = "UTC"
+    fun disabledScheduleNeverRequestsAResponse() {
+        val status = DailyCheckInCalculator.status(
+            nowMs = utcTime(2026, Calendar.JULY, 22, 12),
+            enabled = false,
+            nextDueAtMs = utcTime(2026, Calendar.JULY, 22, 9)
         )
 
-        assertEquals(DailyCheckInPhase.COMPLETE, confirmed.phase)
+        assertEquals(DailyCheckInPhase.DISABLED, status.phase)
+        assertFalse(status.needsResponse)
     }
 
-    private companion object {
-        const val HOUR_MS = 60L * 60L * 1_000L
-    }
+    private fun utcTime(year: Int, month: Int, day: Int, hour: Int): Long =
+        Calendar.getInstance(TimeZone.getTimeZone("UTC")).apply {
+            clear()
+            set(year, month, day, hour, 0, 0)
+        }.timeInMillis
 }

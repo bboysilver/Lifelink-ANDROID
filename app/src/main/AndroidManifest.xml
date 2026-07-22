@@ -52,5 +52,9 @@
         <receiver
             android:name=".monitoring.SmsStatusReceiver"
             android:exported="false" />
+
+        <receiver
+            android:name=".monitoring.DailyCheckInReceiver"
+            android:exported="false" />
     </application>
 </manifest>
