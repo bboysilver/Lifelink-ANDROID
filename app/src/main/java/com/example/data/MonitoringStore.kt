@@ -1,5 +1,6 @@
 package com.example.data
 
+import android.annotation.SuppressLint
 import android.content.Context
 import kotlin.math.max
 
@@ -54,6 +55,18 @@ class MonitoringStore(context: Context) {
     var smsSubscriptionId: Int
         get() = preferences.getInt(KEY_SMS_SUBSCRIPTION_ID, INVALID_SUBSCRIPTION_ID)
         set(value) = preferences.edit().putInt(KEY_SMS_SUBSCRIPTION_ID, value).apply()
+
+    var dailyCheckInEnabled: Boolean
+        get() = preferences.getBoolean(KEY_DAILY_CHECK_IN_ENABLED, false)
+        set(value) = preferences.edit().putBoolean(KEY_DAILY_CHECK_IN_ENABLED, value).apply()
+
+    var dailyCheckInHour: Int
+        get() = preferences.getInt(KEY_DAILY_CHECK_IN_HOUR, DailyCheckInCalculator.DEFAULT_HOUR)
+            .coerceIn(0, 23)
+        set(value) = preferences.edit().putInt(KEY_DAILY_CHECK_IN_HOUR, value.coerceIn(0, 23)).apply()
+
+    val pendingSosEventMs: Long
+        get() = preferences.getLong(KEY_PENDING_SOS_EVENT_MS, 0L)
 
     val isSetupCompleted: Boolean
         get() = preferences.getBoolean(KEY_SETUP_COMPLETED, false)
@@ -145,6 +158,45 @@ class MonitoringStore(context: Context) {
             .apply()
     }
 
+    fun dailyCheckInStatus(nowMs: Long = System.currentTimeMillis()): DailyCheckInStatus =
+        DailyCheckInCalculator.status(
+            nowMs = nowMs,
+            enabled = dailyCheckInEnabled,
+            hour = dailyCheckInHour,
+            lastConfirmedDayStartMs = preferences.getLong(KEY_DAILY_CONFIRMED_DAY_START_MS, 0L)
+        )
+
+    fun markDailyCheckInPrompted(dayStartMs: Long) {
+        preferences.edit().putLong(KEY_DAILY_PROMPTED_DAY_START_MS, dayStartMs).apply()
+    }
+
+    fun wasDailyCheckInPrompted(dayStartMs: Long): Boolean =
+        preferences.getLong(KEY_DAILY_PROMPTED_DAY_START_MS, 0L) == dayStartMs
+
+    fun confirmDailyCheckIn(nowMs: Long = System.currentTimeMillis()): Long {
+        val dayStartMs = dailyCheckInStatus(nowMs).dayStartMs
+        preferences.edit().putLong(KEY_DAILY_CONFIRMED_DAY_START_MS, dayStartMs).apply()
+        return dayStartMs
+    }
+
+    fun markDailyCheckInAlerted(dayStartMs: Long) {
+        preferences.edit().putLong(KEY_DAILY_ALERTED_DAY_START_MS, dayStartMs).apply()
+    }
+
+    fun wasDailyCheckInAlerted(dayStartMs: Long): Boolean =
+        preferences.getLong(KEY_DAILY_ALERTED_DAY_START_MS, 0L) == dayStartMs
+
+    @SuppressLint("ApplySharedPref")
+    fun beginSos(nowMs: Long = System.currentTimeMillis()): Long {
+        if (pendingSosEventMs > 0L) return pendingSosEventMs
+        preferences.edit().putLong(KEY_PENDING_SOS_EVENT_MS, nowMs).commit()
+        return nowMs
+    }
+
+    fun clearPendingSos() {
+        preferences.edit().remove(KEY_PENDING_SOS_EVENT_MS).apply()
+    }
+
     fun markPreAlert(deadlineMs: Long) {
         preferences.edit().putLong(KEY_PRE_ALERT_DEADLINE_MS, deadlineMs).apply()
     }
@@ -221,6 +273,12 @@ class MonitoringStore(context: Context) {
         private const val KEY_SERVICE_ERROR = "service_error"
         private const val KEY_DEVICE_ALIAS = "device_alias"
         private const val KEY_SMS_SUBSCRIPTION_ID = "sms_subscription_id"
+        private const val KEY_DAILY_CHECK_IN_ENABLED = "daily_check_in_enabled"
+        private const val KEY_DAILY_CHECK_IN_HOUR = "daily_check_in_hour"
+        private const val KEY_DAILY_CONFIRMED_DAY_START_MS = "daily_confirmed_day_start_ms"
+        private const val KEY_DAILY_PROMPTED_DAY_START_MS = "daily_prompted_day_start_ms"
+        private const val KEY_DAILY_ALERTED_DAY_START_MS = "daily_alerted_day_start_ms"
+        private const val KEY_PENDING_SOS_EVENT_MS = "pending_sos_event_ms"
         private const val INVALID_SUBSCRIPTION_ID = -1
         private const val DEFAULT_DEVICE_ALIAS = "라이프링크 사용자"
         const val HEARTBEAT_TIMEOUT_MS = 45_000L

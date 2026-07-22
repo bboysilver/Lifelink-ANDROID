@@ -10,6 +10,7 @@ import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import com.example.data.AppDatabase
 import com.example.data.Contact
+import com.example.data.DailyCheckInPhase
 import com.example.data.EventLog
 import com.example.data.LifeLinkRepository
 import com.example.data.MonitoringRuntimeState
@@ -60,6 +61,17 @@ class LifeLinkViewModel(application: Application) : AndroidViewModel(application
     private val _monitorHours = MutableStateFlow(12)
     val monitorHours: StateFlow<Int> = _monitorHours.asStateFlow()
 
+    private val _dailyCheckInEnabled = MutableStateFlow(false)
+    val dailyCheckInEnabled: StateFlow<Boolean> = _dailyCheckInEnabled.asStateFlow()
+
+    private val _dailyCheckInHour = MutableStateFlow(9)
+    val dailyCheckInHour: StateFlow<Int> = _dailyCheckInHour.asStateFlow()
+
+    private val _dailyCheckInDue = MutableStateFlow(false)
+    val dailyCheckInDue: StateFlow<Boolean> = _dailyCheckInDue.asStateFlow()
+
+    private val _sosCountdownSeconds = MutableStateFlow(0)
+    val sosCountdownSeconds: StateFlow<Int> = _sosCountdownSeconds.asStateFlow()
     private val _remainingSeconds = MutableStateFlow(12 * 3600L)
     val remainingSeconds: StateFlow<Long> = _remainingSeconds.asStateFlow()
 
@@ -91,6 +103,7 @@ class LifeLinkViewModel(application: Application) : AndroidViewModel(application
     val setupCompleted: StateFlow<Boolean> = _setupCompleted.asStateFlow()
 
     private var tickerJob: Job? = null
+    private var sosJob: Job? = null
     private var lastObservedActivityMs = 0L
 
     init {
@@ -146,6 +159,7 @@ class LifeLinkViewModel(application: Application) : AndroidViewModel(application
     }
 
     fun reportSurvival(reason: String = "사용자 직접 무사 확인") {
+        if (monitoringStore.dailyCheckInEnabled) monitoringStore.confirmDailyCheckIn()
         monitoringStore.resetDeadline(reason = reason)
         if (monitoringStore.desiredEnabled) {
             try {
@@ -158,6 +172,80 @@ class LifeLinkViewModel(application: Application) : AndroidViewModel(application
             repository.insertLog("SENSOR_RESET", "활동 확인으로 안심 마감시각을 갱신했습니다.", reason)
         }
         refreshUi()
+    }
+
+    fun updateDailyCheckIn(hour: Int?) {
+        monitoringStore.dailyCheckInEnabled = hour != null
+        if (hour != null) monitoringStore.dailyCheckInHour = hour
+        viewModelScope.launch {
+            repository.insertLog(
+                "SETTINGS_CHANGED",
+                if (hour == null) "매일 안부 확인을 사용하지 않습니다." else "매일 ${hour}시에 안부를 확인합니다."
+            )
+        }
+        refreshUi()
+    }
+
+    fun reportDailySafe() {
+        monitoringStore.confirmDailyCheckIn()
+        reportSurvival("매일 안부 확인에서 괜찮음 응답")
+    }
+
+    fun requestDailyHelp() {
+        if (beginSosCountdown()) {
+            monitoringStore.confirmDailyCheckIn()
+            refreshUi()
+        }
+    }
+
+    fun startSosCountdown() {
+        beginSosCountdown()
+    }
+
+    private fun beginSosCountdown(): Boolean {
+        if (contacts.value.isEmpty()) {
+            logValidationError("SOS를 보낼 보호자 연락처를 먼저 등록해 주세요.")
+            return false
+        }
+        if (
+            ContextCompat.checkSelfPermission(context, Manifest.permission.SEND_SMS) !=
+            PackageManager.PERMISSION_GRANTED || readySmsLineOrLog() == null
+        ) return false
+        if (sosJob?.isActive == true) return false
+        val sendAtMs = System.currentTimeMillis() + SOS_COUNTDOWN_SECONDS * 1_000L
+        if (monitoringStore.beginSos(sendAtMs) != sendAtMs) {
+            logValidationError("이미 처리 중인 SOS 요청이 있습니다.")
+            return false
+        }
+        try {
+            // Start immediately so the persisted countdown survives the UI leaving the foreground.
+            MonitoringService.triggerSos(context)
+        } catch (error: RuntimeException) {
+            monitoringStore.clearPendingSos()
+            monitoringStore.markServiceError(error.message ?: "SOS 요청을 전달하지 못했습니다.")
+            viewModelScope.launch {
+                repository.insertLog("SYSTEM_ERROR", "SOS 요청을 전달하지 못했습니다.", error.message.orEmpty())
+            }
+            return false
+        }
+
+        sosJob = viewModelScope.launch {
+            for (seconds in SOS_COUNTDOWN_SECONDS downTo 1) {
+                _sosCountdownSeconds.value = seconds
+                delay(1_000)
+            }
+            _sosCountdownSeconds.value = 0
+            repository.insertLog("SOS_REQUESTED", "사용자가 SOS 문자 발송을 요청했습니다.")
+        }
+        return true
+    }
+
+    fun cancelSosCountdown() {
+        if (sosJob?.isActive != true) return
+        sosJob?.cancel()
+        monitoringStore.clearPendingSos()
+        _sosCountdownSeconds.value = 0
+        viewModelScope.launch { repository.insertLog("SOS_CANCELLED", "사용자가 SOS 요청을 취소했습니다.") }
     }
 
     fun updateMonitorHours(hours: Int) {
@@ -316,6 +404,11 @@ class LifeLinkViewModel(application: Application) : AndroidViewModel(application
 
     private fun refreshUi() {
         val snapshot = monitoringStore.snapshot()
+        _dailyCheckInEnabled.value = monitoringStore.dailyCheckInEnabled
+        _dailyCheckInHour.value = monitoringStore.dailyCheckInHour
+        _dailyCheckInDue.value = monitoringStore.dailyCheckInStatus().phase.let {
+            it == DailyCheckInPhase.DUE || it == DailyCheckInPhase.OVERDUE
+        }
         _remainingSeconds.value = snapshot.remainingSeconds
         _isMonitoring.value = snapshot.isRunning
         _desiredMonitoring.value = snapshot.desiredEnabled
@@ -332,6 +425,10 @@ class LifeLinkViewModel(application: Application) : AndroidViewModel(application
                 _sensorPulse.value = false
             }
         }
+    }
+
+    private companion object {
+        const val SOS_COUNTDOWN_SECONDS = 5
     }
 }
 

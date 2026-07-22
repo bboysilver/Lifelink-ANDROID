@@ -35,6 +35,7 @@ import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.FilterChip
@@ -85,6 +86,8 @@ fun LifeLinkApp(viewModel: LifeLinkViewModel) {
     val setupCompleted by viewModel.setupCompleted.collectAsState()
     val alertState by viewModel.alertState.collectAsState()
     val smsSetupState by viewModel.smsSetupState.collectAsState()
+    val dailyCheckInDue by viewModel.dailyCheckInDue.collectAsState()
+    val sosCountdownSeconds by viewModel.sosCountdownSeconds.collectAsState()
     var selectedTab by remember { mutableStateOf(0) }
     var permissionsReady by remember { mutableStateOf(hasCorePermissions(context)) }
 
@@ -122,8 +125,18 @@ fun LifeLinkApp(viewModel: LifeLinkViewModel) {
     }
 
     if (!setupCompleted) StartupSetupDialog(onComplete = viewModel::completeSetup)
-    if (alertState == 1) {
-        PreAlertDialog(onDismiss = { viewModel.reportSurvival("사전 알림에서 무사 확인") })
+    when {
+        sosCountdownSeconds > 0 -> SosCountdownDialog(
+            seconds = sosCountdownSeconds,
+            onCancel = viewModel::cancelSosCountdown
+        )
+        dailyCheckInDue -> DailyCheckInDialog(
+            onSafe = viewModel::reportDailySafe,
+            onHelp = viewModel::requestDailyHelp
+        )
+        alertState == 1 -> PreAlertDialog(
+            onDismiss = { viewModel.reportSurvival("사전 알림에서 무사 확인") }
+        )
     }
 
     Scaffold(
@@ -197,6 +210,8 @@ private fun DashboardTab(
     val runtimeState by viewModel.runtimeState.collectAsState()
     val serviceError by viewModel.serviceError.collectAsState()
     val monitorHours by viewModel.monitorHours.collectAsState()
+    val dailyCheckInEnabled by viewModel.dailyCheckInEnabled.collectAsState()
+    val dailyCheckInHour by viewModel.dailyCheckInHour.collectAsState()
     val smsReady = smsSetupState is SmsSetupState.Ready
     val canStart = permissionsReady && smsReady
 
@@ -312,6 +327,50 @@ private fun DashboardTab(
                 modifier = Modifier.fillMaxWidth().height(64.dp).testTag("survival_report_button")
             ) {
                 Text("무사합니다", fontSize = 20.sp, fontWeight = FontWeight.Black)
+            }
+        }
+
+        item {
+            Button(
+                onClick = viewModel::startSosCountdown,
+                enabled = isMonitoring && smsReady,
+                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error),
+                modifier = Modifier.fillMaxWidth().height(64.dp).testTag("sos_button")
+            ) {
+                Text("SOS · 보호자에게 도움 요청", fontSize = 18.sp, fontWeight = FontWeight.Black)
+            }
+            Text("누르면 5초 후 등록한 보호자에게 실제 문자를 보냅니다.", fontSize = 12.sp)
+        }
+
+        item {
+            Card(modifier = Modifier.fillMaxWidth()) {
+                Column(Modifier.padding(16.dp)) {
+                    Text("매일 안부 확인", fontWeight = FontWeight.Bold)
+                    Text("정한 시각부터 2시간 안에 응답하지 않으면 보호자에게 알립니다.", fontSize = 13.sp)
+                    Spacer(Modifier.height(10.dp))
+                    LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        item {
+                            FilterChip(
+                                selected = !dailyCheckInEnabled,
+                                onClick = { viewModel.updateDailyCheckIn(null) },
+                                label = { Text("사용 안 함") }
+                            )
+                        }
+                        items(listOf(9, 12, 18)) { hour ->
+                            FilterChip(
+                                selected = dailyCheckInEnabled && dailyCheckInHour == hour,
+                                onClick = { viewModel.updateDailyCheckIn(hour) },
+                                label = { Text("${hour}시") }
+                            )
+                        }
+                    }
+                    if (dailyCheckInEnabled) {
+                        OutlinedButton(
+                            onClick = viewModel::reportDailySafe,
+                            modifier = Modifier.fillMaxWidth().height(56.dp)
+                        ) { Text("오늘도 괜찮아요", fontWeight = FontWeight.Bold) }
+                    }
+                }
             }
         }
 
@@ -435,6 +494,7 @@ private fun ContactsTab(viewModel: LifeLinkViewModel) {
                 }
             }
         }
+
         item {
             OutlinedTextField(
                 value = name,
@@ -548,6 +608,7 @@ private fun LogsTab(viewModel: LifeLinkViewModel) {
                 }
             }
         }
+
         item {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                 TextButton(onClick = { showPrivacy = true }) { Text("개인정보 처리방침") }
@@ -578,6 +639,39 @@ private fun LogItem(eventLog: EventLog) {
 }
 
 @Composable
+private fun SosCountdownDialog(seconds: Int, onCancel: () -> Unit) {
+    AlertDialog(
+        onDismissRequest = onCancel,
+        icon = { Icon(Icons.Default.Warning, null, tint = MaterialTheme.colorScheme.error) },
+        title = { Text("SOS 전송까지 ${seconds}초") },
+        text = { Text("취소하지 않으면 등록한 보호자에게 도움 요청 문자를 보냅니다.") },
+        confirmButton = {
+            Button(onClick = onCancel, modifier = Modifier.fillMaxWidth()) {
+                Text("취소")
+            }
+        }
+    )
+}
+
+@Composable
+private fun DailyCheckInDialog(onSafe: () -> Unit, onHelp: () -> Unit) {
+    AlertDialog(
+        onDismissRequest = {},
+        title = { Text("오늘도 괜찮으신가요?") },
+        text = { Text("큰 버튼 하나를 눌러 오늘의 안부를 알려 주세요.") },
+        confirmButton = {
+            Button(onClick = onSafe, modifier = Modifier.fillMaxWidth().height(56.dp)) {
+                Text("괜찮아요", fontWeight = FontWeight.Bold)
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onHelp, modifier = Modifier.fillMaxWidth()) {
+                Text("도움이 필요해요", color = MaterialTheme.colorScheme.error)
+            }
+        }
+    )
+}
+@Composable
 private fun PreAlertDialog(onDismiss: () -> Unit) {
     AlertDialog(
         onDismissRequest = {},
@@ -601,7 +695,7 @@ private fun StartupSetupDialog(onComplete: () -> Unit) {
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text("한 번 설정하면 휴대전화 활동을 백그라운드에서 확인합니다.")
-                Text("설정 시간 동안 활동이 없으면 먼저 알림을 표시하고, 응답이 없을 때 최대 3명의 보호자에게 SIM 문자를 보냅니다.")
+                Text("설정 시간 동안 활동이 없거나 매일 안부 확인에 응답하지 않으면 최대 3명의 보호자에게 SIM 문자를 보냅니다. 홈 화면 SOS로 직접 도움을 요청할 수도 있습니다.")
                 Text("문자·SIM 상태·활동 감지·알림 권한은 다음 화면에서 각각 설명하고 요청합니다. 위치 정보는 수집하지 않습니다.", fontSize = 13.sp)
             }
         },
@@ -616,7 +710,7 @@ private fun PrivacyDialog(onDismiss: () -> Unit, onOpenPolicy: () -> Unit) {
         title = { Text("개인정보 처리방침") },
         text = {
             Text(
-                "보호자 이름과 전화번호, 선택한 SIM, 설정, 최근 활동 시각, 문자 결과 기록은 이 기기에만 저장됩니다. " +
+                "보호자 이름과 전화번호, 선택한 SIM, 설정, 매일 안부 응답, 최근 활동 시각, SOS·문자 결과 기록은 이 기기에만 저장됩니다. " +
                     "긴급 시 사용자 이름과 배터리 상태를 등록한 보호자에게 기기 SIM 문자로 전달합니다. " +
                     "위치, Firebase, Twilio, 광고, 결제 또는 외부 클라우드는 사용하지 않습니다. " +
                     "앱 데이터는 기기 백업에서 제외되며 앱 삭제 시 제거됩니다."

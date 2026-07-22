@@ -76,4 +76,36 @@ class MonitoringStoreTest {
         assertFalse(store.wasPreAlerted(store.deadlineMs))
         assertFalse(store.wasEmergencyDispatched(store.deadlineMs))
     }
+
+    @Test
+    fun dailyCheckInSettingsAndConfirmationSurviveRecreation() {
+        val store = MonitoringStore(context)
+        store.dailyCheckInEnabled = true
+        store.dailyCheckInHour = 18
+        val confirmedDay = store.confirmDailyCheckIn(nowMs = 1_700_000_000_000L)
+
+        val restored = MonitoringStore(context)
+
+        assertTrue(restored.dailyCheckInEnabled)
+        assertEquals(18, restored.dailyCheckInHour)
+        assertEquals(
+            DailyCheckInPhase.COMPLETE,
+            restored.dailyCheckInStatus(confirmedDay + 20 * HOUR_MS).phase
+        )
+    }
+
+    @Test
+    fun pendingSosUsesOneStableEventUntilCleared() {
+        val store = MonitoringStore(context)
+
+        assertEquals(1_000L, store.beginSos(1_000L))
+        assertEquals(1_000L, store.beginSos(2_000L))
+
+        store.clearPendingSos()
+        assertEquals(0L, store.pendingSosEventMs)
+    }
+
+    private companion object {
+        const val HOUR_MS = 60L * 60L * 1_000L
+    }
 }

@@ -12,6 +12,8 @@ import android.util.Log
 import androidx.core.content.ContextCompat
 import kotlin.math.sqrt
 
+enum class SensorStartResult { STEP_DETECTOR, REPEATED_MOTION, FAILED }
+
 class SensorMonitor(
     private val context: Context,
     private val onActivityDetected: (String) -> Unit
@@ -21,12 +23,18 @@ class SensorMonitor(
     private val stepDetector = sensorManager.getDefaultSensor(Sensor.TYPE_STEP_DETECTOR)
     private val accelerometer = sensorManager.getDefaultSensor(Sensor.TYPE_ACCELEROMETER)
     private val repeatedMotionDetector = RepeatedMotionDetector()
+    private val repeatedStepDetector = RepeatedMotionDetector(
+        requiredEvents = 3,
+        minimumSpanMs = 2_000L,
+        windowMs = 15_000L,
+        cooldownMs = 60_000L
+    )
     private var lastX = 0f
     private var lastY = 0f
     private var lastZ = 0f
     private var hasAccelerometerSample = false
-    private var lastStepActivityMs = Long.MIN_VALUE
     private var isRegistered = false
+    private var startResult = SensorStartResult.FAILED
 
     private val statusReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context, intent: Intent?) {
@@ -34,25 +42,44 @@ class SensorMonitor(
         }
     }
 
-    fun start() {
-        if (isRegistered) return
+    fun start(): SensorStartResult {
+        if (isRegistered) return startResult
 
-        if (stepDetector != null) {
-            sensorManager.registerListener(this, stepDetector, SensorManager.SENSOR_DELAY_NORMAL)
-        } else {
-            accelerometer?.let {
-                sensorManager.registerListener(this, it, SensorManager.SENSOR_DELAY_NORMAL)
-            }
+        startResult = when {
+            stepDetector != null && sensorManager.registerListener(
+                this,
+                stepDetector,
+                SensorManager.SENSOR_DELAY_NORMAL
+            ) -> SensorStartResult.STEP_DETECTOR
+            accelerometer != null && sensorManager.registerListener(
+                this,
+                accelerometer,
+                SensorManager.SENSOR_DELAY_NORMAL
+            ) -> SensorStartResult.REPEATED_MOTION
+            else -> SensorStartResult.FAILED
+        }
+        if (startResult == SensorStartResult.FAILED) {
+            Log.e(TAG, "No activity sensor could be registered")
+            return startResult
         }
 
-        ContextCompat.registerReceiver(
-            context,
-            statusReceiver,
-            IntentFilter(Intent.ACTION_USER_PRESENT),
-            ContextCompat.RECEIVER_NOT_EXPORTED
-        )
+        try {
+            ContextCompat.registerReceiver(
+                context,
+                statusReceiver,
+                IntentFilter(Intent.ACTION_USER_PRESENT),
+                ContextCompat.RECEIVER_NOT_EXPORTED
+            )
+        } catch (error: RuntimeException) {
+            sensorManager.unregisterListener(this)
+            startResult = SensorStartResult.FAILED
+            Log.e(TAG, "Unlock receiver registration failed", error)
+            return startResult
+        }
+
         isRegistered = true
-        Log.d(TAG, if (stepDetector != null) "Step sensing started" else "Repeated motion sensing started")
+        Log.d(TAG, "Sensing engine started with $startResult")
+        return startResult
     }
 
     fun stop() {
@@ -75,9 +102,8 @@ class SensorMonitor(
     }
 
     private fun handleStep(nowMs: Long) {
-        if (lastStepActivityMs == Long.MIN_VALUE || nowMs - lastStepActivityMs >= ACTIVITY_COOLDOWN_MS) {
-            lastStepActivityMs = nowMs
-            onActivityDetected("걸음 감지")
+        if (repeatedStepDetector.record(nowMs)) {
+            onActivityDetected("반복된 걸음 감지")
         }
     }
 
@@ -105,6 +131,5 @@ class SensorMonitor(
     companion object {
         private const val TAG = "SensorMonitor"
         private const val MOTION_THRESHOLD = 3.5f
-        private const val ACTIVITY_COOLDOWN_MS = 60_000L
     }
 }

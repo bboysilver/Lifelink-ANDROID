@@ -101,6 +101,12 @@ class EmergencySmsSender(
         fun emergencyEventId(deadlineMs: Long, contactId: Int): String =
             "emergency:$deadlineMs:$contactId"
 
+        fun sosEventId(requestedAtMs: Long, contactId: Int): String =
+            "sos:$requestedAtMs:$contactId"
+
+        fun dailyEventId(dayStartMs: Long, contactId: Int): String =
+            "daily:$dayStartMs:$contactId"
+
         fun testEventId(nowMs: Long, contactId: Int): String = "test:$nowMs:$contactId"
     }
 }
