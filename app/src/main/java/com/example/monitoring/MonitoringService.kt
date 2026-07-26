@@ -117,7 +117,7 @@ class MonitoringService : Service() {
             ACTION_REPORT_SAFE -> confirmSafe("알림에서 무사 확인")
             ACTION_DAILY_SAFE -> confirmDailyCheckIn("매일 안부 알림에서 괜찮음 확인")
             ACTION_CANCEL_SOS -> store.cancelPendingSos()
-            ACTION_TRIGGER_SOS, ACTION_EVALUATE_DAILY -> Unit
+            ACTION_TRIGGER_SOS -> Unit
             ACTION_RESET -> store.resetDeadline(
                 reason = intent.getStringExtra(EXTRA_REASON) ?: "활동 확인"
             )
@@ -227,45 +227,8 @@ class MonitoringService : Service() {
     }
 
     private suspend fun evaluateDailyCheckIn() {
-        val status = store.dailyCheckInStatus()
-        when (status.phase) {
-            DailyCheckInPhase.DUE -> {
-                if (!SafetyNotificationCapability.canPost(this)) {
-                    skipDailyCheckInBecauseNotificationsAreBlocked(status.dueAtMs)
-                } else if (!store.wasDailyCheckInPrompted(status.dueAtMs)) {
-                    store.dailyCheckInError = ""
-                    store.markDailyCheckInPrompted(status.dueAtMs)
-                    showDailyCheckInNotification()
-                    repository.insertLog("DAILY_CHECK_IN", "오늘의 안부 확인을 요청했습니다.")
-                }
-            }
-            DailyCheckInPhase.OVERDUE -> {
-                if (!SafetyNotificationCapability.canPost(this)) {
-                    skipDailyCheckInBecauseNotificationsAreBlocked(status.dueAtMs)
-                } else if (!store.wasDailyCheckInPrompted(status.dueAtMs)) {
-                    val deferredDueAtMs = store.deferDailyCheckInToNow()
-                    DailyCheckInScheduler(this).ensureScheduled()
-                    store.markDailyCheckInPrompted(deferredDueAtMs)
-                    showDailyCheckInNotification()
-                    repository.insertLog(
-                        "DAILY_CHECK_IN",
-                        "알림을 표시하지 못한 안부 확인을 지금부터 다시 시작했습니다."
-                    )
-                } else if (!store.wasDailyCheckInAlerted(status.dueAtMs)) {
-                    dispatchDailyCheckInAlert(status.dueAtMs)
-                }
-            }
-            else -> Unit
-        }
-    }
-
-    private suspend fun skipDailyCheckInBecauseNotificationsAreBlocked(dueAtMs: Long) {
-        val message = "알림이 꺼져 있어 안부 확인 문자를 보내지 않았습니다. 알림 권한과 채널을 확인해 주세요."
-        store.dailyCheckInError = message
-        store.advanceDailyCheckIn(dueAtMs)
-        DailyCheckInScheduler(this).ensureScheduled()
-        NotificationManagerCompat.from(this).cancel(DAILY_NOTIFICATION_ID)
-        repository.insertLog("SYSTEM_ERROR", message)
+        val result = DailyCheckInTask(this, store, repository).run()
+        result.nextRunAtMs?.let { DailyCheckInWorker.enqueueAt(this, result.dueAtMs, it) }
     }
     private suspend fun dispatchInactivityAlert(deadlineMs: Long) {
         val batch = queueSafetyMessage(
@@ -280,21 +243,6 @@ class MonitoringService : Service() {
         }
     }
 
-    private suspend fun dispatchDailyCheckInAlert(dueAtMs: Long) {
-        val batch = queueSafetyMessage(
-            message = EmergencyMessageBuilder.buildDailyCheckInMissed(store.deviceAlias),
-            eventIdFor = { EmergencySmsSender.dailyEventId(dueAtMs, it.id) }
-        ) ?: return
-        if (batch.statuses.all { it.isResolved }) {
-            store.markDailyCheckInAlerted(dueAtMs)
-            store.advanceDailyCheckIn(dueAtMs)
-            store.dailyCheckInError = ""
-            DailyCheckInScheduler(this).ensureScheduled()
-            showCompletionNotification("안부 미응답 문자", batch.statuses)
-        } else if (batch.queuedAny) {
-            showRetryNotification("안부 미응답 문자 발송 확인 중")
-        }
-    }
     private suspend fun dispatchPendingSos() {
         val eventMs = store.claimPendingSos() ?: store.activeSosEventMs
         if (eventMs <= 0L) return
@@ -506,26 +454,6 @@ class MonitoringService : Service() {
         notifyIfAllowed(ALERT_NOTIFICATION_ID, notification)
     }
 
-    private fun showDailyCheckInNotification() {
-        val safeIntent = PendingIntent.getService(
-            this,
-            2,
-            Intent(this, MonitoringService::class.java).setAction(ACTION_DAILY_SAFE),
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-        )
-        val notification = NotificationCompat.Builder(this, SafetyNotificationCapability.ALERT_CHANNEL_ID)
-            .setSmallIcon(android.R.drawable.ic_dialog_info)
-            .setContentTitle("오늘도 괜찮으신가요?")
-            .setContentText("2시간 안에 안부를 알려 주세요.")
-            .setContentIntent(launchAppIntent())
-            .setPriority(NotificationCompat.PRIORITY_HIGH)
-            .setCategory(NotificationCompat.CATEGORY_REMINDER)
-            .setAutoCancel(false)
-            .addAction(0, "괜찮아요", safeIntent)
-            .build()
-        notifyIfAllowed(DAILY_NOTIFICATION_ID, notification)
-    }
-
     private fun showAlertNotification(title: String, body: String) {
         val notification = NotificationCompat.Builder(this, SafetyNotificationCapability.ALERT_CHANNEL_ID)
             .setSmallIcon(android.R.drawable.ic_dialog_alert)
@@ -598,7 +526,6 @@ class MonitoringService : Service() {
         const val ACTION_DAILY_SAFE = "com.bboysilver.lifelink.action.DAILY_SAFE"
         const val ACTION_TRIGGER_SOS = "com.bboysilver.lifelink.action.TRIGGER_SOS"
         const val ACTION_CANCEL_SOS = "com.bboysilver.lifelink.action.CANCEL_SOS"
-        const val ACTION_EVALUATE_DAILY = "com.bboysilver.lifelink.action.EVALUATE_DAILY"
         const val EXTRA_REASON = "reason"
         private const val MONITORING_CHANNEL_ID = "lifelink_monitoring"
         private const val MONITORING_NOTIFICATION_ID = 1001
@@ -648,15 +575,6 @@ class MonitoringService : Service() {
             ContextCompat.startForegroundService(
                 context,
                 Intent(context, MonitoringService::class.java).setAction(ACTION_DAILY_SAFE)
-            )
-        }
-
-        fun evaluateDailyCheckIn(context: Context) {
-            val store = MonitoringStore(context)
-            if (!store.dailyCheckInStatus().needsResponse) return
-            ContextCompat.startForegroundService(
-                context,
-                Intent(context, MonitoringService::class.java).setAction(ACTION_EVALUATE_DAILY)
             )
         }
 

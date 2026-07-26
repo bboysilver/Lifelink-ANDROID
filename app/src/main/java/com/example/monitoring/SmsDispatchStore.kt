@@ -263,5 +263,7 @@ class SmsDispatchStore(context: Context) {
         val LOCK = Any()
 
         fun isTestEvent(eventId: String): Boolean = eventId.startsWith("test:")
+
+        fun isDailyEvent(eventId: String): Boolean = eventId.startsWith("daily:")
     }
 }

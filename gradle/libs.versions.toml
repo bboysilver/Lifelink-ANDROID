@@ -5,7 +5,7 @@ junit = "4.13.2"
 androidxJunit = "1.3.0"
 espresso = "3.7.0"
 lifecycle = "2.8.7"
-activityCompose = "1.10.1"
+activityCompose = "1.13.0"
 kotlin = "2.2.10"
 composeBom = "2024.09.00"
 ksp = "2.3.9"
@@ -13,6 +13,7 @@ room = "2.7.0"
 coroutines = "1.10.2"
 testCore = "1.6.1"
 testRunner = "1.6.2"
+work = "2.11.2"
 
 robolectric = "4.16.1"
 
@@ -43,6 +44,8 @@ kotlinx-coroutines-android = { group = "org.jetbrains.kotlinx", name = "kotlinx-
 kotlinx-coroutines-core = { group = "org.jetbrains.kotlinx", name = "kotlinx-coroutines-core", version.ref = "coroutines" }
 androidx-core = { group = "androidx.test", name = "core", version.ref = "testCore" }
 androidx-runner = { group = "androidx.test", name = "runner", version.ref = "testRunner" }
+androidx-work-runtime-ktx = { group = "androidx.work", name = "work-runtime-ktx", version.ref = "work" }
+androidx-work-testing = { group = "androidx.work", name = "work-testing", version.ref = "work" }
 
 robolectric = { group = "org.robolectric", name = "robolectric", version.ref = "robolectric" }
 

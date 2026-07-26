@@ -230,7 +230,7 @@ private fun DashboardTab(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(Icons.Default.Favorite, null, tint = Color(0xFFD63C62), modifier = Modifier.size(30.dp))
+                    Icon(Icons.Default.Favorite, null, tint = Color(0xFFF0645A), modifier = Modifier.size(30.dp))
                     Text("  라이프링크", fontSize = 24.sp, fontWeight = FontWeight.Black)
                 }
                 IconButton(
@@ -714,7 +714,7 @@ private fun PreAlertDialog(onDismiss: () -> Unit) {
 private fun StartupSetupDialog(onComplete: () -> Unit) {
     AlertDialog(
         onDismissRequest = {},
-        icon = { Icon(Icons.Default.Favorite, null, tint = Color(0xFFD63C62)) },
+        icon = { Icon(Icons.Default.Favorite, null, tint = Color(0xFFF0645A)) },
         title = { Text("라이프링크 시작하기") },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {

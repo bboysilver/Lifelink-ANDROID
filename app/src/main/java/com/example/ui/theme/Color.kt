@@ -2,10 +2,9 @@ package com.example.ui.theme
 
 import androidx.compose.ui.graphics.Color
 
-val Purple80 = Color(0xFFD0BCFF)
-val PurpleGrey80 = Color(0xFFCCC2DC)
-val Pink80 = Color(0xFFEFB8C8)
-
-val Purple40 = Color(0xFF6650a4)
-val PurpleGrey40 = Color(0xFF625b71)
-val Pink40 = Color(0xFF7D5260)
+val LifeNavy = Color(0xFF102A43)
+val LifeTeal = Color(0xFF1F8A80)
+val LifeCoral = Color(0xFFF0645A)
+val LifeIvory = Color(0xFFF6F4EF)
+val LifeMist = Color(0xFFDDF1EE)
+val LifeSlate = Color(0xFF526575)

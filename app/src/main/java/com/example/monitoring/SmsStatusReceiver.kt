@@ -32,7 +32,8 @@ class SmsStatusReceiver : BroadcastReceiver() {
         val pendingResult = goAsync()
         CoroutineScope(SupervisorJob() + Dispatchers.IO).launch {
             try {
-                val outcome = SmsDispatchStore(context.applicationContext).recordCallback(
+                val dispatchStore = SmsDispatchStore(context.applicationContext)
+                val outcome = dispatchStore.recordCallback(
                     stage = callbackStage,
                     eventId = eventId,
                     attempt = attempt,
@@ -48,6 +49,18 @@ class SmsStatusReceiver : BroadcastReceiver() {
                     phoneSuffix = phoneSuffix,
                     resultCode = callbackResultCode
                 )
+                if (
+                    SmsDispatchStore.isDailyEvent(eventId) &&
+                    outcome != SmsCallbackOutcome.PENDING &&
+                    outcome != SmsCallbackOutcome.IGNORED
+                ) {
+                    DailyCheckInWorker.enqueueForSmsStatus(
+                        context = context.applicationContext,
+                        eventId = eventId,
+                        outcome = outcome,
+                        retryAtMs = dispatchStore.status(eventId).retryAtMs
+                    )
+                }
             } finally {
                 pendingResult.finish()
             }

@@ -17,6 +17,7 @@ import com.example.data.MonitoringRuntimeState
 import com.example.data.MonitoringStore
 import com.example.monitoring.EmergencyMessageBuilder
 import com.example.monitoring.DailyCheckInScheduler
+import com.example.monitoring.DailyCheckInWorker
 import com.example.monitoring.EmergencySmsSender
 import com.example.monitoring.MonitoringService
 import com.example.monitoring.SafetyNotificationCapability
@@ -198,6 +199,7 @@ class LifeLinkViewModel(application: Application) : AndroidViewModel(application
         }
 
         val nextDueAtMs = monitoringStore.configureDailyCheckIn(hour)
+        if (hour == null) DailyCheckInWorker.cancelAll(context)
         dailyCheckInScheduler.ensureScheduled()
         viewModelScope.launch {
             repository.insertLog(
