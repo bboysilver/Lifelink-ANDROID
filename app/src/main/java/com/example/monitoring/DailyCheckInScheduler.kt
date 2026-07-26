@@ -15,21 +15,20 @@ class DailyCheckInScheduler(context: Context) {
         cancel()
         if (!store.dailyCheckInEnabled) return
 
-        var dueAtMs = store.ensureDailyCheckInScheduled(nowMs)
-        val status = store.dailyCheckInStatus(nowMs)
+        store.ensureDailyCheckInScheduled(nowMs)
+        var status = store.dailyCheckInStatus(nowMs)
         if (status.phase == com.example.data.DailyCheckInPhase.OVERDUE &&
             !store.wasDailyCheckInPrompted(status.dueAtMs)
         ) {
-            dueAtMs = store.deferDailyCheckInToNow(nowMs)
+            store.deferDailyCheckInToNow(nowMs)
+            status = store.dailyCheckInStatus(nowMs)
         }
-        if (dueAtMs <= 0L) return
+        if (status.dueAtMs <= 0L) return
 
-        scheduleAlarm(ACTION_PROMPT, PROMPT_REQUEST_CODE, dueAtMs)
-        scheduleAlarm(
-            ACTION_OVERDUE,
-            OVERDUE_REQUEST_CODE,
-            dueAtMs + com.example.data.DailyCheckInCalculator.RESPONSE_WINDOW_MS
-        )
+        if (!store.wasDailyCheckInPrompted(status.dueAtMs)) {
+            scheduleAlarm(ACTION_PROMPT, PROMPT_REQUEST_CODE, status.dueAtMs)
+        }
+        scheduleAlarm(ACTION_OVERDUE, OVERDUE_REQUEST_CODE, status.overdueAtMs)
     }
 
     fun cancel() {

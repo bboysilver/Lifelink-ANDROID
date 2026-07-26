@@ -33,6 +33,23 @@ jobs:
           KEY_ALIAS: ${{ secrets.ANDROID_UPLOAD_KEY_ALIAS }}
           KEY_PASSWORD: ${{ secrets.ANDROID_UPLOAD_KEY_PASSWORD }}
         run: ./gradlew --no-daemon test lint bundleRelease
+      - name: Verify final merged manifest safety permissions
+        run: |
+          set -euo pipefail
+          manifest="app/build/intermediates/merged_manifest/release/processReleaseMainManifest/AndroidManifest.xml"
+          test -f "$manifest"
+          grep -q 'android.permission.SEND_SMS' "$manifest"
+          for forbidden in \
+            'com.google.android.gms.permission.AD_ID' \
+            'android.permission.INTERNET' \
+            'android.permission.ACCESS_FINE_LOCATION' \
+            'android.permission.ACCESS_COARSE_LOCATION' \
+            'android.permission.ACCESS_BACKGROUND_LOCATION'; do
+            if grep -q "$forbidden" "$manifest"; then
+              echo "Forbidden permission found in final release manifest: $forbidden" >&2
+              exit 1
+            fi
+          done
       - name: Strictly verify AAB signature and upload certificate
         env:
           STORE_PASSWORD: ${{ secrets.ANDROID_UPLOAD_STORE_PASSWORD }}

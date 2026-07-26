@@ -45,6 +45,8 @@ class MonitoringService : Service() {
     private var monitorJob: Job? = null
     private var lastBlockingAlertMs = 0L
     private var lastMaintenanceMs = 0L
+    private var lastHeartbeatWriteMs = 0L
+    private var lastOngoingNotificationMinute = Long.MIN_VALUE
     private var startupFailed = false
 
     override fun onCreate() {
@@ -110,7 +112,11 @@ class MonitoringService : Service() {
                 return
             }
         }
-        if (store.desiredEnabled) store.markServiceRunning()
+        if (store.desiredEnabled) {
+            val nowMs = System.currentTimeMillis()
+            store.markServiceRunning(nowMs)
+            lastHeartbeatWriteMs = nowMs
+        }
     }
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         when (intent?.action) {
@@ -182,7 +188,11 @@ class MonitoringService : Service() {
                 firstPass = false
                 runMaintenanceIfNeeded()
                 if (store.desiredEnabled) {
-                    store.markHeartbeat()
+                    val nowMs = System.currentTimeMillis()
+                    if (MonitoringUpdatePolicy.shouldWriteHeartbeat(lastHeartbeatWriteMs, nowMs)) {
+                        store.markHeartbeat(nowMs)
+                        lastHeartbeatWriteMs = nowMs
+                    }
                     evaluateInactivityDeadline()
                 }
                 evaluateDailyCheckIn()
@@ -431,6 +441,9 @@ class MonitoringService : Service() {
         return builder.build()
     }
     private fun updateOngoingNotification(remainingSeconds: Long) {
+        val minute = MonitoringUpdatePolicy.remainingMinute(remainingSeconds)
+        if (minute == lastOngoingNotificationMinute) return
+        lastOngoingNotificationMinute = minute
         notifyIfAllowed(MONITORING_NOTIFICATION_ID, buildOngoingNotification(remainingSeconds))
     }
 
@@ -589,4 +602,13 @@ class MonitoringService : Service() {
             )
         }
     }
+}
+internal object MonitoringUpdatePolicy {
+    const val HEARTBEAT_WRITE_INTERVAL_MS = 60_000L
+
+    fun shouldWriteHeartbeat(lastWriteMs: Long, nowMs: Long): Boolean =
+        lastWriteMs <= 0L || nowMs - lastWriteMs >= HEARTBEAT_WRITE_INTERVAL_MS
+
+    fun remainingMinute(remainingSeconds: Long): Long =
+        (remainingSeconds.coerceAtLeast(0L) + 59L) / 60L
 }

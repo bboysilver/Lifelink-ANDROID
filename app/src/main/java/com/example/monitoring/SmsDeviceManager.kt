@@ -58,6 +58,22 @@ internal object SmsSetupResolver {
     }
 }
 
+internal object SmsCapabilityResolver {
+    fun isSupported(
+        sdkInt: Int,
+        hasTelephonyFeature: Boolean,
+        hasMessagingFeature: Boolean,
+        telephonySmsCapable: Boolean
+    ): Boolean {
+        val hasRequiredFeature = if (sdkInt >= Build.VERSION_CODES.TIRAMISU) {
+            hasMessagingFeature
+        } else {
+            hasTelephonyFeature
+        }
+        return hasRequiredFeature && telephonySmsCapable
+    }
+}
+
 class SmsDeviceManager(
     private val context: Context,
     private val monitoringStore: MonitoringStore = MonitoringStore(context)
@@ -102,16 +118,22 @@ class SmsDeviceManager(
     }
 
     private fun hasSmsCapability(): Boolean {
-        if (!context.packageManager.hasSystemFeature(PackageManager.FEATURE_TELEPHONY_MESSAGING)) {
-            return false
-        }
+        val packageManager = context.packageManager
         val telephonyManager = context.getSystemService(TelephonyManager::class.java)
-        return if (Build.VERSION.SDK_INT >= 35) {
+        val telephonySmsCapable = if (Build.VERSION.SDK_INT >= 35) {
             telephonyManager.isDeviceSmsCapable
         } else {
             @Suppress("DEPRECATION")
             telephonyManager.isSmsCapable
         }
+        return SmsCapabilityResolver.isSupported(
+            sdkInt = Build.VERSION.SDK_INT,
+            hasTelephonyFeature = packageManager.hasSystemFeature(PackageManager.FEATURE_TELEPHONY),
+            hasMessagingFeature = packageManager.hasSystemFeature(
+                PackageManager.FEATURE_TELEPHONY_MESSAGING
+            ),
+            telephonySmsCapable = telephonySmsCapable
+        )
     }
 
     private fun hasPhoneStatePermission(): Boolean =

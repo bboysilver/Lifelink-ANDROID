@@ -12,11 +12,18 @@ class BootReceiver : BroadcastReceiver() {
             intent.action != Intent.ACTION_MY_PACKAGE_REPLACED
         ) return
         val store = MonitoringStore(context)
+        MaintenanceWorker.ensureScheduled(context)
         if (store.isSetupCompleted && store.desiredEnabled) {
             MonitoringService.start(context)
         }
         if (store.isSetupCompleted && store.dailyCheckInEnabled) {
             DailyCheckInScheduler(context).ensureScheduled()
+            val status = store.dailyCheckInStatus()
+            if (status.phase == com.example.data.DailyCheckInPhase.DUE &&
+                store.wasDailyCheckInPrompted(status.dueAtMs)
+            ) {
+                DailyCheckInWorker.enqueueFromRecovery(context)
+            }
         }
     }
 }

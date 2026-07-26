@@ -50,8 +50,15 @@ object DailyCheckInCalculator {
         return calendar.timeInMillis
     }
 
-    fun status(nowMs: Long, enabled: Boolean, nextDueAtMs: Long): DailyCheckInStatus {
-        val overdueAtMs = nextDueAtMs + RESPONSE_WINDOW_MS
+    fun status(
+        nowMs: Long,
+        enabled: Boolean,
+        nextDueAtMs: Long,
+        responseDeadlineAtMs: Long = 0L
+    ): DailyCheckInStatus {
+        val overdueAtMs = responseDeadlineAtMs
+            .takeIf { it > nextDueAtMs }
+            ?: (nextDueAtMs + RESPONSE_WINDOW_MS)
         val phase = when {
             !enabled -> DailyCheckInPhase.DISABLED
             nextDueAtMs <= 0L || nowMs < nextDueAtMs -> DailyCheckInPhase.UPCOMING

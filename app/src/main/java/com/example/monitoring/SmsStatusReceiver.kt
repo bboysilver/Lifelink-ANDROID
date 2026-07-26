@@ -49,17 +49,27 @@ class SmsStatusReceiver : BroadcastReceiver() {
                     phoneSuffix = phoneSuffix,
                     resultCode = callbackResultCode
                 )
-                if (
-                    SmsDispatchStore.isDailyEvent(eventId) &&
-                    outcome != SmsCallbackOutcome.PENDING &&
-                    outcome != SmsCallbackOutcome.IGNORED
-                ) {
-                    DailyCheckInWorker.enqueueForSmsStatus(
-                        context = context.applicationContext,
-                        eventId = eventId,
-                        outcome = outcome,
-                        retryAtMs = dispatchStore.status(eventId).retryAtMs
-                    )
+                if (outcome != SmsCallbackOutcome.PENDING && outcome != SmsCallbackOutcome.IGNORED) {
+                    val status = dispatchStore.status(eventId)
+                    if (SmsDispatchStore.isDailyEvent(eventId)) {
+                        DailyCheckInWorker.enqueueForSmsStatus(
+                            context = context.applicationContext,
+                            eventId = eventId,
+                            outcome = outcome,
+                            retryAtMs = status.retryAtMs
+                        )
+                    } else if (SafetySmsEvent.parse(eventId) != null) {
+                        val runAtMs = if (outcome == SmsCallbackOutcome.FAILED_RETRYABLE) {
+                            status.retryAtMs
+                        } else {
+                            System.currentTimeMillis()
+                        }
+                        SafetySmsRetryWorker.enqueueAt(
+                            context = context.applicationContext,
+                            eventId = eventId,
+                            runAtMs = runAtMs
+                        )
+                    }
                 }
             } finally {
                 pendingResult.finish()

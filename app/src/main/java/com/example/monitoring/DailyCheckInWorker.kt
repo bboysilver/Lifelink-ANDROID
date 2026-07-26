@@ -13,6 +13,7 @@ import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
 import androidx.work.CoroutineWorker
+import androidx.work.Data
 import androidx.work.ExistingWorkPolicy
 import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.WorkManager
@@ -30,7 +31,7 @@ class DailyCheckInWorker(
     params: WorkerParameters
 ) : CoroutineWorker(appContext, params) {
     override suspend fun doWork(): Result = try {
-        val result = DailyCheckInTask(applicationContext).run()
+        val result = DailyCheckInTask(applicationContext).run(restorePrompt = inputData.getBoolean(KEY_RESTORE_PROMPT, false))
         result.nextRunAtMs?.let { enqueueAt(applicationContext, result.dueAtMs, it) }
         Result.success()
     } catch (error: RuntimeException) {
@@ -42,6 +43,7 @@ class DailyCheckInWorker(
     companion object {
         private const val WORK_PREFIX = "lifelink-daily-check-in"
         internal const val WORK_TAG = "lifelink-daily-check-in-work"
+        private const val KEY_RESTORE_PROMPT = "restore_prompt"
 
         fun enqueueFromAlarm(context: Context, action: String) {
             val dueAtMs = MonitoringStore(context).dailyCheckInStatus().dueAtMs
@@ -49,6 +51,16 @@ class DailyCheckInWorker(
                 context = context,
                 uniqueName = "$WORK_PREFIX:alarm:$action:$dueAtMs",
                 delayMs = 0L
+            )
+        }
+
+        fun enqueueFromRecovery(context: Context) {
+            val status = MonitoringStore(context).dailyCheckInStatus()
+            enqueue(
+                context = context,
+                uniqueName = "$WORK_PREFIX:recovery:${status.dueAtMs}",
+                delayMs = 0L,
+                restorePrompt = true
             )
         }
 
@@ -84,8 +96,14 @@ class DailyCheckInWorker(
             WorkManager.getInstance(context.applicationContext).cancelAllWorkByTag(WORK_TAG)
         }
 
-        private fun enqueue(context: Context, uniqueName: String, delayMs: Long) {
+        private fun enqueue(
+            context: Context,
+            uniqueName: String,
+            delayMs: Long,
+            restorePrompt: Boolean = false
+        ) {
             val request = OneTimeWorkRequestBuilder<DailyCheckInWorker>()
+                .setInputData(Data.Builder().putBoolean(KEY_RESTORE_PROMPT, restorePrompt).build())
                 .setInitialDelay(delayMs.coerceAtLeast(0L), TimeUnit.MILLISECONDS)
                 .addTag(WORK_TAG)
                 .build()
@@ -112,7 +130,10 @@ internal class DailyCheckInTask(
 ) {
     private val appContext = context.applicationContext
 
-    suspend fun run(nowMs: Long = System.currentTimeMillis()): DailyCheckInRunResult {
+    suspend fun run(
+        nowMs: Long = System.currentTimeMillis(),
+        restorePrompt: Boolean = false
+    ): DailyCheckInRunResult {
         val status = store.dailyCheckInStatus(nowMs)
         return when (status.phase) {
             DailyCheckInPhase.DUE -> {
@@ -120,9 +141,14 @@ internal class DailyCheckInTask(
                     skipBecauseNotificationsAreBlocked(status.dueAtMs)
                 } else if (!store.wasDailyCheckInPrompted(status.dueAtMs)) {
                     store.dailyCheckInError = ""
-                    store.markDailyCheckInPrompted(status.dueAtMs)
+                    if (store.markDailyCheckInPrompted(status.dueAtMs, nowMs)) {
+                        showPromptNotification()
+                        DailyCheckInScheduler(appContext).ensureScheduled(nowMs)
+                        repository.insertLog("DAILY_CHECK_IN", "오늘의 안부 확인을 요청했습니다.")
+                    }
+                } else if (restorePrompt) {
                     showPromptNotification()
-                    repository.insertLog("DAILY_CHECK_IN", "오늘의 안부 확인을 요청했습니다.")
+                    repository.insertLog("DAILY_CHECK_IN", "기기 재시작 후 안부 확인 알림을 다시 표시했습니다.")
                 }
                 DailyCheckInRunResult(status.dueAtMs)
             }
@@ -134,13 +160,14 @@ internal class DailyCheckInTask(
                     }
                     !store.wasDailyCheckInPrompted(status.dueAtMs) -> {
                         val deferredDueAtMs = store.deferDailyCheckInToNow(nowMs)
-                        DailyCheckInScheduler(appContext).ensureScheduled(nowMs)
-                        store.markDailyCheckInPrompted(deferredDueAtMs)
-                        showPromptNotification()
-                        repository.insertLog(
-                            "DAILY_CHECK_IN",
-                            "표시되지 않은 안부 확인을 지금부터 다시 시작했습니다."
-                        )
+                        if (store.markDailyCheckInPrompted(deferredDueAtMs, nowMs)) {
+                            showPromptNotification()
+                            DailyCheckInScheduler(appContext).ensureScheduled(nowMs)
+                            repository.insertLog(
+                                "DAILY_CHECK_IN",
+                                "표시되지 않은 안부 확인을 지금부터 다시 시작했습니다."
+                            )
+                        }
                         DailyCheckInRunResult(deferredDueAtMs)
                     }
                     store.wasDailyCheckInAlerted(status.dueAtMs) ->

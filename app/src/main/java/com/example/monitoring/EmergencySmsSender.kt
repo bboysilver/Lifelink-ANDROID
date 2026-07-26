@@ -56,11 +56,20 @@ class EmergencySmsSender(
                 )
             }
             manager.sendMultipartTextMessage(phone, null, parts, sentIntents, deliveredIntents)
-            return SmsQueueResult.QUEUED
         } catch (error: Exception) {
             dispatchStore.markQueueFailure(eventId, attempt, RESULT_QUEUE_EXCEPTION, nowMs)
+            val status = dispatchStore.status(eventId)
+            if (status.state == SmsDispatchState.FAILED_RETRYABLE) {
+                SafetySmsRetryWorker.enqueueAt(context, eventId, status.retryAtMs)
+            }
             throw error
         }
+        SafetySmsRetryWorker.enqueueAt(
+            context,
+            eventId,
+            nowMs + SmsDispatchStore.CALLBACK_TIMEOUT_MS
+        )
+        return SmsQueueResult.QUEUED
     }
 
     fun status(eventId: String, nowMs: Long = System.currentTimeMillis()): SmsDispatchStatus {

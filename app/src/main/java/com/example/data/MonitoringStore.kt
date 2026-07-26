@@ -66,6 +66,9 @@ class MonitoringStore(context: Context) {
     val dailyNextDueAtMs: Long
         get() = preferences.getLong(KEY_DAILY_NEXT_DUE_AT_MS, 0L)
 
+    val dailyResponseDeadlineAtMs: Long
+        get() = preferences.getLong(KEY_DAILY_RESPONSE_DEADLINE_AT_MS, 0L)
+
     var dailyCheckInError: String
         get() = preferences.getString(KEY_DAILY_CHECK_IN_ERROR, "").orEmpty()
         set(value) = preferences.edit().putString(KEY_DAILY_CHECK_IN_ERROR, value).apply()
@@ -173,7 +176,8 @@ class MonitoringStore(context: Context) {
         DailyCheckInCalculator.status(
             nowMs = nowMs,
             enabled = dailyCheckInEnabled,
-            nextDueAtMs = dailyNextDueAtMs
+            nextDueAtMs = dailyNextDueAtMs,
+            responseDeadlineAtMs = dailyResponseDeadlineAtMs
         )
 
     @SuppressLint("ApplySharedPref")
@@ -187,6 +191,7 @@ class MonitoringStore(context: Context) {
                 .remove(KEY_DAILY_NEXT_DUE_AT_MS)
                 .remove(KEY_DAILY_PROMPTED_DUE_AT_MS)
                 .remove(KEY_DAILY_ALERTED_DUE_AT_MS)
+                .remove(KEY_DAILY_RESPONSE_DEADLINE_AT_MS)
                 .remove(KEY_DAILY_CHECK_IN_ERROR)
                 .commit()
             return 0L
@@ -200,6 +205,7 @@ class MonitoringStore(context: Context) {
             .putLong(KEY_DAILY_NEXT_DUE_AT_MS, nextDueAtMs)
             .remove(KEY_DAILY_PROMPTED_DUE_AT_MS)
             .remove(KEY_DAILY_ALERTED_DUE_AT_MS)
+            .remove(KEY_DAILY_RESPONSE_DEADLINE_AT_MS)
             .remove(KEY_DAILY_CHECK_IN_ERROR)
             .remove(KEY_DAILY_CONFIRMED_DAY_START_MS)
             .remove(KEY_DAILY_PROMPTED_DAY_START_MS)
@@ -223,12 +229,24 @@ class MonitoringStore(context: Context) {
             .putLong(KEY_DAILY_NEXT_DUE_AT_MS, nowMs)
             .remove(KEY_DAILY_PROMPTED_DUE_AT_MS)
             .remove(KEY_DAILY_ALERTED_DUE_AT_MS)
+            .remove(KEY_DAILY_RESPONSE_DEADLINE_AT_MS)
             .commit()
         return nowMs
     }
 
-    fun markDailyCheckInPrompted(dueAtMs: Long) {
-        preferences.edit().putLong(KEY_DAILY_PROMPTED_DUE_AT_MS, dueAtMs).apply()
+    @SuppressLint("ApplySharedPref")
+    fun markDailyCheckInPrompted(
+        dueAtMs: Long,
+        nowMs: Long = System.currentTimeMillis()
+    ): Boolean {
+        if (!dailyCheckInEnabled || dailyNextDueAtMs != dueAtMs) return false
+        return preferences.edit()
+            .putLong(KEY_DAILY_PROMPTED_DUE_AT_MS, dueAtMs)
+            .putLong(
+                KEY_DAILY_RESPONSE_DEADLINE_AT_MS,
+                nowMs + DailyCheckInCalculator.RESPONSE_WINDOW_MS
+            )
+            .commit()
     }
 
     fun wasDailyCheckInPrompted(dueAtMs: Long): Boolean =
@@ -257,6 +275,7 @@ class MonitoringStore(context: Context) {
             .putLong(KEY_DAILY_NEXT_DUE_AT_MS, nextDueAtMs)
             .remove(KEY_DAILY_PROMPTED_DUE_AT_MS)
             .remove(KEY_DAILY_ALERTED_DUE_AT_MS)
+            .remove(KEY_DAILY_RESPONSE_DEADLINE_AT_MS)
             .commit()
     }
     @SuppressLint("ApplySharedPref")
@@ -381,6 +400,7 @@ class MonitoringStore(context: Context) {
         private const val KEY_DAILY_NEXT_DUE_AT_MS = "daily_next_due_at_ms"
         private const val KEY_DAILY_PROMPTED_DUE_AT_MS = "daily_prompted_due_at_ms"
         private const val KEY_DAILY_ALERTED_DUE_AT_MS = "daily_alerted_due_at_ms"
+        private const val KEY_DAILY_RESPONSE_DEADLINE_AT_MS = "daily_response_deadline_at_ms"
         private const val KEY_DAILY_CHECK_IN_ERROR = "daily_check_in_error"
         private const val KEY_DAILY_CONFIRMED_DAY_START_MS = "daily_confirmed_day_start_ms"
         private const val KEY_DAILY_PROMPTED_DAY_START_MS = "daily_prompted_day_start_ms"
@@ -389,7 +409,7 @@ class MonitoringStore(context: Context) {
         private const val KEY_ACTIVE_SOS_EVENT_MS = "active_sos_event_ms"
         private const val INVALID_SUBSCRIPTION_ID = -1
         private const val DEFAULT_DEVICE_ALIAS = "라이프링크 사용자"
-        const val HEARTBEAT_TIMEOUT_MS = 45_000L
+        const val HEARTBEAT_TIMEOUT_MS = 150_000L
         const val START_TIMEOUT_MS = 30_000L
         private val SOS_LOCK = Any()
     }

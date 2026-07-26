@@ -299,10 +299,10 @@ private fun DashboardTab(
                         fontWeight = FontWeight.Bold
                     )
                     if (!smsReady) {
-                        Text(smsSetupState.userMessage(), textAlign = TextAlign.Center, fontSize = 13.sp)
+                        Text(smsSetupState.userMessage(), textAlign = TextAlign.Center, fontSize = 16.sp)
                     }
                     if (runtimeState == MonitoringRuntimeState.ERROR && serviceError.isNotBlank()) {
-                        Text(serviceError, textAlign = TextAlign.Center, fontSize = 13.sp)
+                        Text(serviceError, textAlign = TextAlign.Center, fontSize = 16.sp)
                         Spacer(Modifier.height(8.dp))
                         if (canStart) {
                             OutlinedButton(onClick = viewModel::restartMonitoring) {
@@ -347,22 +347,22 @@ private fun DashboardTab(
             ) {
                 Text("SOS · 보호자에게 도움 요청", fontSize = 18.sp, fontWeight = FontWeight.Black)
             }
-            Text("누르면 5초 후 등록한 보호자에게 실제 문자를 보냅니다.", fontSize = 12.sp)
+            Text("누르면 5초 후 등록한 보호자에게 실제 문자를 보냅니다.", fontSize = 16.sp)
         }
 
         item {
             Card(modifier = Modifier.fillMaxWidth()) {
                 Column(Modifier.padding(16.dp)) {
                     Text("매일 안부 확인", fontWeight = FontWeight.Bold)
-                    Text("정한 시각부터 2시간 안에 응답하지 않으면 보호자에게 알립니다.", fontSize = 13.sp)
+                    Text("정한 시각부터 2시간 안에 응답하지 않으면 보호자에게 알립니다.", fontSize = 16.sp)
                     if (dailyScheduleText.isNotBlank()) {
-                        Text(dailyScheduleText, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                        Text(dailyScheduleText, fontSize = 16.sp, fontWeight = FontWeight.Bold)
                     }
                     if (dailyCheckInError.isNotBlank()) {
                         Text(
                             dailyCheckInError,
                             color = MaterialTheme.colorScheme.error,
-                            fontSize = 13.sp
+                            fontSize = 16.sp
                         )
                     }
                     Spacer(Modifier.height(10.dp))
@@ -425,7 +425,7 @@ private fun DashboardTab(
                     Icon(Icons.Default.Warning, null)
                     Text(
                         "  이 앱은 119나 의료기기를 대신하지 않습니다. 휴대전화 전원이 꺼지거나 앱이 강제 종료된 경우에는 감지와 문자 발송이 작동하지 않을 수 있습니다.",
-                        fontSize = 13.sp
+                        fontSize = 16.sp
                     )
                 }
             }
@@ -449,7 +449,7 @@ private fun PermissionSetupCard(
     Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer)) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Text("안전 기능 설정을 확인해 주세요", fontWeight = FontWeight.Bold)
-            Text(smsSetupState.userMessage(), fontSize = 13.sp)
+            Text(smsSetupState.userMessage(), fontSize = 16.sp)
             if (
                 smsSetupState !is SmsSetupState.Blocked ||
                 smsSetupState.issue != SmsSetupIssue.UNSUPPORTED_DEVICE
@@ -628,7 +628,7 @@ private fun LogsTab(viewModel: LifeLinkViewModel) {
                 Column(Modifier.padding(16.dp)) {
                     Text("현재 전송 방식", fontWeight = FontWeight.Bold)
                     Text("선택한 활성 SIM을 통한 자동 문자")
-                    Text("이 버전은 위치 정보를 수집하거나 전송하지 않습니다.", fontSize = 13.sp)
+                    Text("이 버전은 위치 정보를 수집하거나 전송하지 않습니다.", fontSize = 16.sp)
                 }
             }
         }
@@ -656,8 +656,8 @@ private fun LogItem(eventLog: EventLog) {
     Card(modifier = Modifier.fillMaxWidth()) {
         Column(Modifier.padding(14.dp)) {
             Text(eventLog.message, fontWeight = FontWeight.Bold)
-            Text(time, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            if (eventLog.detail.isNotBlank()) Text(eventLog.detail, fontSize = 12.sp)
+            Text(time, fontSize = 16.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            if (eventLog.detail.isNotBlank()) Text(eventLog.detail, fontSize = 16.sp)
         }
     }
 }
@@ -720,7 +720,7 @@ private fun StartupSetupDialog(onComplete: () -> Unit) {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text("한 번 설정하면 휴대전화 활동을 백그라운드에서 확인합니다.")
                 Text("설정 시간 동안 활동이 없거나 매일 안부 확인에 응답하지 않으면 최대 3명의 보호자에게 SIM 문자를 보냅니다. 홈 화면 SOS로 직접 도움을 요청할 수도 있습니다.")
-                Text("문자·SIM 상태·활동 감지·알림 권한은 다음 화면에서 각각 설명하고 요청합니다. 위치 정보는 수집하지 않습니다.", fontSize = 13.sp)
+                Text("문자·SIM 상태·활동 감지·알림 권한은 다음 화면에서 각각 설명하고 요청합니다. 위치 정보는 수집하지 않습니다.", fontSize = 16.sp)
             }
         },
         confirmButton = { Button(onClick = onComplete) { Text("설정 시작") } }

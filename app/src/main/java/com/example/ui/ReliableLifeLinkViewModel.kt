@@ -19,6 +19,7 @@ import com.example.monitoring.EmergencyMessageBuilder
 import com.example.monitoring.DailyCheckInScheduler
 import com.example.monitoring.DailyCheckInWorker
 import com.example.monitoring.EmergencySmsSender
+import com.example.monitoring.MaintenanceWorker
 import com.example.monitoring.MonitoringService
 import com.example.monitoring.SafetyNotificationCapability
 import com.example.monitoring.SmsDeviceManager
@@ -137,6 +138,7 @@ class LifeLinkViewModel(application: Application) : AndroidViewModel(application
             _setupCompleted.value = monitoringStore.isSetupCompleted
             monitoringStore.initializeDeadlineIfMissing()
             dailyCheckInScheduler.ensureScheduled()
+            MaintenanceWorker.ensureScheduled(context)
             refreshSmsSetup()
             startTicker()
         }

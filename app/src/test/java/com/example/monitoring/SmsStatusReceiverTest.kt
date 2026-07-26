@@ -88,6 +88,31 @@ class SmsStatusReceiverTest {
         }
         assertFalse(work.isEmpty())
     }
+    @Test
+    fun emergencyFailureSchedulesDurableSafetyRetryWork() = runBlocking {
+        val attempt = store.beginAttempt(EVENT_ID, totalParts = 1, nowMs = 1_000L)!!
+
+        sendSentCallback(
+            attempt = attempt,
+            partIndex = 0,
+            totalParts = 1,
+            resultCode = SmsManager.RESULT_ERROR_NO_SERVICE
+        )
+
+        awaitState(SmsDispatchState.FAILED_RETRYABLE)
+        val work = withTimeout(3_000L) {
+            var scheduled = emptyList<androidx.work.WorkInfo>()
+            while (scheduled.isEmpty()) {
+                scheduled = WorkManager.getInstance(context)
+                    .getWorkInfosByTag(SafetySmsRetryWorker.WORK_TAG)
+                    .get(3, TimeUnit.SECONDS)
+                if (scheduled.isEmpty()) delay(10L)
+            }
+            scheduled
+        }
+        assertFalse(work.isEmpty())
+    }
+
     @Suppress("DEPRECATION")
     private fun sendSentCallback(
         attempt: Int,
