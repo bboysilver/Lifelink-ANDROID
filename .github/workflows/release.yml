@@ -2,6 +2,9 @@ name: Signed Android release
 
 on:
   workflow_dispatch:
+  push:
+    tags:
+      - 'v*'
 
 permissions:
   contents: read
