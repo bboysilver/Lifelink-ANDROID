@@ -224,6 +224,26 @@ class MonitoringStore(context: Context) {
     }
 
     @SuppressLint("ApplySharedPref")
+    fun recalculateDailyCheckInAfterClockChange(
+        nowMs: Long = System.currentTimeMillis()
+    ): Long {
+        if (!dailyCheckInEnabled) return 0L
+        val currentDueAtMs = dailyNextDueAtMs
+        val hasActivePrompt = currentDueAtMs > 0L &&
+            wasDailyCheckInPrompted(currentDueAtMs) &&
+            dailyResponseDeadlineAtMs > currentDueAtMs
+        if (hasActivePrompt) return currentDueAtMs
+
+        val recalculatedDueAtMs = DailyCheckInCalculator.nextDueAt(nowMs, dailyCheckInHour)
+        preferences.edit()
+            .putLong(KEY_DAILY_NEXT_DUE_AT_MS, recalculatedDueAtMs)
+            .remove(KEY_DAILY_PROMPTED_DUE_AT_MS)
+            .remove(KEY_DAILY_ALERTED_DUE_AT_MS)
+            .remove(KEY_DAILY_RESPONSE_DEADLINE_AT_MS)
+            .commit()
+        return recalculatedDueAtMs
+    }
+    @SuppressLint("ApplySharedPref")
     fun deferDailyCheckInToNow(nowMs: Long = System.currentTimeMillis()): Long {
         preferences.edit()
             .putLong(KEY_DAILY_NEXT_DUE_AT_MS, nowMs)

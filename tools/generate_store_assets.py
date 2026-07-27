@@ -1,4 +1,5 @@
 from pathlib import Path
+import os
 
 from PIL import Image, ImageDraw, ImageFilter, ImageFont
 
@@ -17,15 +18,38 @@ WHITE = "#FFFFFF"
 PALE_CORAL = "#FFE4E0"
 LINE = "#DCE3E8"
 
-FONT_REGULAR_PATH = Path("C:/Windows/Fonts/malgun.ttf")
-FONT_BOLD_PATH = Path("C:/Windows/Fonts/malgunbd.ttf")
+FONT_CANDIDATES = {
+    False: (
+        "C:/Windows/Fonts/malgun.ttf",
+        "/System/Library/Fonts/AppleSDGothicNeo.ttc",
+        "/Library/Fonts/NotoSansKR-Regular.otf",
+        "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
+        "/usr/share/fonts/truetype/noto/NotoSansKR-Regular.ttf",
+    ),
+    True: (
+        "C:/Windows/Fonts/malgunbd.ttf",
+        "/System/Library/Fonts/AppleSDGothicNeo.ttc",
+        "/Library/Fonts/NotoSansKR-Bold.otf",
+        "/usr/share/fonts/opentype/noto/NotoSansCJK-Bold.ttc",
+        "/usr/share/fonts/truetype/noto/NotoSansKR-Bold.ttf",
+    ),
+}
+
+
+def resolve_font_path(bold: bool) -> Path:
+    override_name = "LIFELINK_FONT_BOLD" if bold else "LIFELINK_FONT_REGULAR"
+    override = os.environ.get(override_name)
+    candidates = ([override] if override else []) + list(FONT_CANDIDATES[bold])
+    for candidate in candidates:
+        if candidate and Path(candidate).is_file():
+            return Path(candidate)
+    raise FileNotFoundError(
+        f"Korean font not found. Install Noto Sans KR/CJK or set {override_name}."
+    )
 
 
 def font(size: int, bold: bool = False) -> ImageFont.FreeTypeFont:
-    path = FONT_BOLD_PATH if bold else FONT_REGULAR_PATH
-    if not path.exists():
-        raise FileNotFoundError(f"Korean font not found: {path}")
-    return ImageFont.truetype(str(path), size)
+    return ImageFont.truetype(str(resolve_font_path(bold)), size)
 
 
 def center_text(
@@ -131,13 +155,13 @@ def create_store_icon() -> Image.Image:
     return image.resize((512, 512), Image.Resampling.LANCZOS)
 
 
-def draw_brand_pill(image: Image.Image, x: int, y: int, size: int = 48) -> None:
+def draw_brand_pill(image: Image.Image, x: int, y: int) -> None:
     draw = ImageDraw.Draw(image)
-    pill = (x, y, x + 250, y + 72)
-    draw.rounded_rectangle(pill, radius=36, fill=WHITE)
-    draw.rounded_rectangle((x + 10, y + 10, x + 62, y + 62), radius=16, fill=NAVY)
-    draw_icon_mark(draw, (x + 12, y + 12, x + 60, y + 60))
-    draw.text((x + 78, y + 15), "라이프링크", font=font(28, bold=True), fill=NAVY)
+    pill = (x, y, x + 292, y + 84)
+    draw.rounded_rectangle(pill, radius=42, fill=WHITE)
+    draw.rounded_rectangle((x + 10, y + 10, x + 74, y + 74), radius=20, fill=NAVY)
+    draw_icon_mark(draw, (x + 13, y + 13, x + 71, y + 71))
+    draw.text((x + 92, y + 19), "라이프링크", font=font(31, bold=True), fill=NAVY)
 
 
 def draw_status_bar(draw: ImageDraw.ImageDraw, box: tuple[int, int, int, int]) -> None:

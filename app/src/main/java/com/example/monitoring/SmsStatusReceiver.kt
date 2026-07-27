@@ -7,6 +7,7 @@ import android.content.Intent
 import android.telephony.SmsManager
 import com.example.data.AppDatabase
 import com.example.data.LifeLinkRepository
+import com.example.data.SafetyIncidentRepository
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -41,16 +42,8 @@ class SmsStatusReceiver : BroadcastReceiver() {
                     totalParts = totalParts,
                     resultCode = callbackResultCode
                 )
-                logOutcome(
-                    context = context.applicationContext,
-                    eventId = eventId,
-                    outcome = outcome,
-                    contactName = contactName,
-                    phoneSuffix = phoneSuffix,
-                    resultCode = callbackResultCode
-                )
+                val status = dispatchStore.status(eventId)
                 if (outcome != SmsCallbackOutcome.PENDING && outcome != SmsCallbackOutcome.IGNORED) {
-                    val status = dispatchStore.status(eventId)
                     if (SmsDispatchStore.isDailyEvent(eventId)) {
                         DailyCheckInWorker.enqueueForSmsStatus(
                             context = context.applicationContext,
@@ -71,7 +64,18 @@ class SmsStatusReceiver : BroadcastReceiver() {
                         )
                     }
                 }
-            } finally {
+                if (SafetySmsEvent.parse(eventId) != null) {
+                    SafetyIncidentRepository(AppDatabase.getDatabase(context.applicationContext))
+                        .recordStatus(eventId, status)
+                }
+                logOutcome(
+                    context = context.applicationContext,
+                    eventId = eventId,
+                    outcome = outcome,
+                    contactName = contactName,
+                    phoneSuffix = phoneSuffix,
+                    resultCode = callbackResultCode
+                )            } finally {
                 pendingResult.finish()
             }
         }

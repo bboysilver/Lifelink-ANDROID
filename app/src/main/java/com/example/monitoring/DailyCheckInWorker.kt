@@ -23,6 +23,7 @@ import com.example.data.AppDatabase
 import com.example.data.DailyCheckInPhase
 import com.example.data.LifeLinkRepository
 import com.example.data.MonitoringStore
+import com.example.data.SafetyIncidentRepository
 import kotlinx.coroutines.flow.first
 import java.util.concurrent.TimeUnit
 
@@ -126,6 +127,9 @@ internal class DailyCheckInTask(
     private val store: MonitoringStore = MonitoringStore(context.applicationContext),
     private val repository: LifeLinkRepository = LifeLinkRepository(
         AppDatabase.getDatabase(context.applicationContext)
+    ),
+    private val incidents: SafetyIncidentRepository = SafetyIncidentRepository(
+        AppDatabase.getDatabase(context.applicationContext)
     )
 ) {
     private val appContext = context.applicationContext
@@ -192,8 +196,14 @@ internal class DailyCheckInTask(
         dueAtMs: Long,
         nowMs: Long
     ): DailyCheckInRunResult {
-        val contacts = repository.allContacts.first().take(3)
-        if (contacts.isEmpty()) {
+        val incidentId = "${SafetySmsEventType.DAILY.wireName}:$dueAtMs"
+        val existingSnapshot = incidents.get(incidentId)
+        val contactsForNewIncident = if (existingSnapshot == null) {
+            repository.allContacts.first().take(3)
+        } else {
+            emptyList()
+        }
+        if (existingSnapshot == null && contactsForNewIncident.isEmpty()) {
             return blocked(
                 dueAtMs,
                 nowMs,
@@ -210,46 +220,64 @@ internal class DailyCheckInTask(
                 "문자 권한이 없어 안부 미응답 문자를 보낼 수 없습니다."
             )
         }
-        val smsSetup = SmsDeviceManager(appContext, store).inspect()
-        if (smsSetup !is SmsSetupState.Ready) {
-            return blocked(dueAtMs, nowMs, smsSetup.userMessage())
+
+        val snapshot = existingSnapshot ?: run {
+            val smsSetup = SmsDeviceManager(appContext, store).inspect()
+            if (smsSetup !is SmsSetupState.Ready) {
+                return blocked(dueAtMs, nowMs, smsSetup.userMessage())
+            }
+            incidents.getOrCreate(
+                incidentId = incidentId,
+                type = SafetySmsEventType.DAILY.wireName,
+                occurredAtMs = dueAtMs,
+                deviceAlias = store.deviceAlias,
+                message = EmergencyMessageBuilder.buildDailyCheckInMissed(store.deviceAlias),
+                batteryPercent = null,
+                subscriptionId = smsSetup.line.subscriptionId,
+                contacts = contactsForNewIncident,
+                nowMs = nowMs
+            )
+        }
+
+        if (snapshot.recipients.isEmpty()) {
+            return blocked(dueAtMs, nowMs, "안부 미응답 문자 수신자 기록이 없습니다.")
         }
 
         val sender = EmergencySmsSender(appContext)
         var queuedAny = false
-        contacts.forEach { contact ->
-            val eventId = EmergencySmsSender.dailyEventId(dueAtMs, contact.id)
+        snapshot.recipients.forEach { recipient ->
             try {
                 if (
                     sender.queue(
-                        eventId = eventId,
-                        contact = contact,
-                        message = EmergencyMessageBuilder.buildDailyCheckInMissed(store.deviceAlias),
-                        subscriptionId = smsSetup.line.subscriptionId
+                        eventId = recipient.eventId,
+                        contact = recipient.asContact(),
+                        message = snapshot.incident.message,
+                        subscriptionId = snapshot.incident.subscriptionId,
+                        nowMs = nowMs
                     ) == SmsQueueResult.QUEUED
                 ) {
                     queuedAny = true
                     repository.insertLog(
                         "SMS_QUEUED",
-                        "${contact.name} 보호자 안부 미응답 문자 결과를 기다리고 있습니다."
+                        "${recipient.name} 보호자 안부 미응답 문자 결과를 기다리고 있습니다."
                     )
                 }
             } catch (error: Exception) {
                 repository.insertLog(
                     "SMS_FAILED",
-                    "${contact.name} 보호자 안부 미응답 문자 요청에 실패했습니다.",
+                    "${recipient.name} 보호자 안부 미응답 문자 요청에 실패했습니다.",
                     error.message ?: "알 수 없는 오류"
                 )
             }
+            incidents.recordStatus(recipient.eventId, sender.status(recipient.eventId, nowMs))
         }
 
-        val statuses = contacts.map {
-            sender.status(EmergencySmsSender.dailyEventId(dueAtMs, it.id), nowMs)
-        }
+        val statuses = snapshot.recipients.map { sender.status(it.eventId, nowMs) }
         if (statuses.all { it.isResolved }) {
             store.markDailyCheckInAlerted(dueAtMs)
             store.advanceDailyCheckIn(dueAtMs)
             store.dailyCheckInError = ""
+            incidents.completeAndRedact(incidentId, nowMs)
             DailyCheckInScheduler(appContext).ensureScheduled(nowMs)
             NotificationManagerCompat.from(appContext).cancel(DAILY_NOTIFICATION_ID)
             showCompletionNotification(statuses.count { it.state == SmsDispatchState.FAILED_FINAL })
@@ -276,7 +304,6 @@ internal class DailyCheckInTask(
             ?.coerceAtLeast(nowMs + 1_000L)
         return DailyCheckInRunResult(dueAtMs, nextRunAtMs)
     }
-
     private suspend fun blocked(
         dueAtMs: Long,
         nowMs: Long,
@@ -373,7 +400,7 @@ internal class DailyCheckInTask(
 
     companion object {
         private const val ALERT_NOTIFICATION_ID = 1002
-        private const val DAILY_NOTIFICATION_ID = 1003
+        internal const val DAILY_NOTIFICATION_ID = 1003
         private const val BLOCKED_RETRY_MS = 30 * 60 * 1_000L
     }
 }

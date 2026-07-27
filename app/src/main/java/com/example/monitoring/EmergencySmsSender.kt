@@ -29,8 +29,27 @@ class EmergencySmsSender(
 
         val phone = contact.phoneNumber.filter { it.isDigit() || it == '+' }
         require(phone.length >= 8) { "Invalid emergency contact number" }
-        val manager = deviceManager.managerFor(subscriptionId)
-        val parts = manager.divideMessage(message)
+        val manager: android.telephony.SmsManager
+        val parts: ArrayList<String>
+        try {
+            manager = deviceManager.managerFor(subscriptionId)
+            parts = manager.divideMessage(message)
+        } catch (error: Exception) {
+            val failedAttempt = dispatchStore.beginAttempt(eventId, 1, retryPolicy, nowMs)
+            if (failedAttempt != null) {
+                dispatchStore.markQueueFailure(
+                    eventId,
+                    failedAttempt,
+                    RESULT_QUEUE_EXCEPTION,
+                    nowMs
+                )
+                val status = dispatchStore.status(eventId)
+                if (status.state == SmsDispatchState.FAILED_RETRYABLE) {
+                    SafetySmsRetryWorker.enqueueAt(context, eventId, status.retryAtMs)
+                }
+            }
+            throw error
+        }
         val attempt = dispatchStore.beginAttempt(eventId, parts.size, retryPolicy, nowMs)
             ?: return SmsQueueResult.WAITING
 

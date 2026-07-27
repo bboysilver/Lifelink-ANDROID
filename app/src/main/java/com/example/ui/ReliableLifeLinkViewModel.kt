@@ -389,7 +389,7 @@ class LifeLinkViewModel(application: Application) : AndroidViewModel(application
     }
 
     fun clearAllLogs() {
-        smsDispatchStore.clearAll()
+        smsDispatchStore.clearResolved()
         viewModelScope.launch { repository.clearLogs() }
     }
 

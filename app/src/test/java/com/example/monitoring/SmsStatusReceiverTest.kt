@@ -9,6 +9,10 @@ import android.os.Looper
 import androidx.test.core.app.ApplicationProvider
 import androidx.work.WorkManager
 import androidx.work.testing.WorkManagerTestInitHelper
+import com.example.data.AppDatabase
+import com.example.data.Contact
+import com.example.data.SafetyIncidentRepository
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
@@ -148,6 +152,46 @@ class SmsStatusReceiverTest {
         }
     }
 
+    @Test
+    fun callbackPersistsRecipientStateAndQueuesTheRetryWorker() = runBlocking {
+        val database = AppDatabase.getDatabase(context)
+        kotlinx.coroutines.withContext(Dispatchers.IO) { database.clearAllTables() }
+        val incidents = SafetyIncidentRepository(database)
+        incidents.getOrCreate(
+            incidentId = "emergency:200",
+            type = "emergency",
+            occurredAtMs = 200L,
+            deviceAlias = "사용자 폰",
+            message = "고정된 긴급 메시지",
+            batteryPercent = 10,
+            subscriptionId = 1,
+            contacts = listOf(Contact(id = 1, name = "보호자", phoneNumber = "01012345678")),
+            nowMs = 500L
+        )
+        val attempt = store.beginAttempt(EVENT_ID, totalParts = 1, nowMs = 1_000L)!!
+
+        sendSentCallback(
+            attempt = attempt,
+            partIndex = 0,
+            totalParts = 1,
+            resultCode = SmsManager.RESULT_ERROR_NO_SERVICE
+        )
+
+        awaitState(SmsDispatchState.FAILED_RETRYABLE)
+        val recipient = withTimeout(3_000L) {
+            var saved = incidents.recipient(EVENT_ID)
+            while (saved?.dispatchState != SmsDispatchState.FAILED_RETRYABLE.name) {
+                delay(10L)
+                saved = incidents.recipient(EVENT_ID)
+            }
+            saved
+        }
+        assertEquals(1, recipient?.attemptCount)
+        val work = WorkManager.getInstance(context)
+            .getWorkInfosByTag(SafetySmsRetryWorker.WORK_TAG)
+            .get(3, TimeUnit.SECONDS)
+        assertFalse(work.isEmpty())
+    }
     companion object {
         private const val EVENT_ID = "emergency:200:1"
         private val NO_OP_RECEIVER = object : BroadcastReceiver() {

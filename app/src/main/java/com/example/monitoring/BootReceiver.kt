@@ -13,6 +13,7 @@ class BootReceiver : BroadcastReceiver() {
         ) return
         val store = MonitoringStore(context)
         MaintenanceWorker.ensureScheduled(context)
+        SafetySmsRetryWorker.enqueueRecovery(context)
         if (store.isSetupCompleted && store.desiredEnabled) {
             MonitoringService.start(context)
         }

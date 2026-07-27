@@ -4,6 +4,7 @@ import android.Manifest
 import android.content.Context
 import android.content.pm.PackageManager
 import android.util.Log
+import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
 import androidx.work.CoroutineWorker
 import androidx.work.Data
@@ -12,27 +13,33 @@ import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.WorkManager
 import androidx.work.WorkerParameters
 import com.example.data.AppDatabase
-import com.example.data.LifeLinkRepository
+import com.example.data.Contact
 import com.example.data.MonitoringStore
-import kotlinx.coroutines.flow.first
+import com.example.data.SafetyIncidentRepository
+import com.example.data.SafetyIncidentSnapshot
+import com.example.data.SafetyRecipient
 import java.util.concurrent.TimeUnit
 
-internal enum class SafetySmsEventType { EMERGENCY, SOS }
+internal enum class SafetySmsEventType(val wireName: String) {
+    EMERGENCY("emergency"),
+    SOS("sos"),
+    DAILY("daily")
+}
 
 internal data class SafetySmsEvent(
     val type: SafetySmsEventType,
     val occurredAtMs: Long,
     val contactId: Int
 ) {
+    val incidentId: String
+        get() = "${type.wireName}:$occurredAtMs"
+
     companion object {
         fun parse(eventId: String): SafetySmsEvent? {
             val parts = eventId.split(':')
             if (parts.size != 3) return null
-            val type = when (parts[0]) {
-                "emergency" -> SafetySmsEventType.EMERGENCY
-                "sos" -> SafetySmsEventType.SOS
-                else -> return null
-            }
+            val type = SafetySmsEventType.entries.firstOrNull { it.wireName == parts[0] }
+                ?: return null
             val occurredAtMs = parts[1].toLongOrNull()?.takeIf { it > 0L } ?: return null
             val contactId = parts[2].toIntOrNull()?.takeIf { it > 0 } ?: return null
             return SafetySmsEvent(type, occurredAtMs, contactId)
@@ -44,19 +51,23 @@ class SafetySmsRetryWorker(
     appContext: Context,
     params: WorkerParameters
 ) : CoroutineWorker(appContext, params) {
-    override suspend fun doWork(): Result {
-        val eventId = inputData.getString(KEY_EVENT_ID) ?: return Result.failure()
-        return try {
-            val nextRunAtMs = SafetySmsRetryTask(applicationContext).run(eventId)
-            if (nextRunAtMs != null) enqueueAt(applicationContext, eventId, nextRunAtMs)
-            Result.success()
-        } catch (_: RuntimeException) {
-            Result.retry()
+    override suspend fun doWork(): Result = try {
+        val task = SafetySmsRetryTask(applicationContext)
+        val requestedEventId = inputData.getString(KEY_EVENT_ID)
+        val eventIds = requestedEventId?.let(::listOf) ?: task.pendingEventIds()
+        eventIds.forEach { eventId ->
+            task.run(eventId)?.let { nextRunAtMs ->
+                enqueueAt(applicationContext, eventId, nextRunAtMs)
+            }
         }
+        Result.success()
+    } catch (_: RuntimeException) {
+        Result.retry()
     }
 
     companion object {
         private const val WORK_PREFIX = "lifelink-safety-sms"
+        private const val RECOVERY_WORK_NAME = "$WORK_PREFIX:recovery"
         internal const val WORK_TAG = "lifelink-safety-sms-work"
         private const val KEY_EVENT_ID = "event_id"
 
@@ -70,17 +81,29 @@ class SafetySmsRetryWorker(
                 )
                 .addTag(WORK_TAG)
                 .build()
-            val workManager = try {
-                WorkManager.getInstance(context.applicationContext)
-            } catch (error: IllegalStateException) {
-                Log.e(WORK_TAG, "WorkManager is unavailable; the foreground loop will retry", error)
-                return
-            }
-            workManager.enqueueUniqueWork(
+            workManager(context)?.enqueueUniqueWork(
                 "$WORK_PREFIX:$eventId",
                 ExistingWorkPolicy.REPLACE,
                 request
             )
+        }
+
+        fun enqueueRecovery(context: Context) {
+            val request = OneTimeWorkRequestBuilder<SafetySmsRetryWorker>()
+                .addTag(WORK_TAG)
+                .build()
+            workManager(context)?.enqueueUniqueWork(
+                RECOVERY_WORK_NAME,
+                ExistingWorkPolicy.KEEP,
+                request
+            )
+        }
+
+        private fun workManager(context: Context): WorkManager? = try {
+            WorkManager.getInstance(context.applicationContext)
+        } catch (error: IllegalStateException) {
+            Log.e(WORK_TAG, "WorkManager is unavailable; the foreground loop will retry", error)
+            null
         }
     }
 }
@@ -88,18 +111,26 @@ class SafetySmsRetryWorker(
 internal class SafetySmsRetryTask(
     context: Context,
     private val store: MonitoringStore = MonitoringStore(context.applicationContext),
-    private val repository: LifeLinkRepository = LifeLinkRepository(
+    private val incidents: SafetyIncidentRepository = SafetyIncidentRepository(
         AppDatabase.getDatabase(context.applicationContext)
     )
 ) {
     private val appContext = context.applicationContext
 
+    suspend fun pendingEventIds(): List<String> =
+        incidents.pendingRecipients().map(SafetyRecipient::eventId)
+
     suspend fun run(eventId: String, nowMs: Long = System.currentTimeMillis()): Long? {
         val event = SafetySmsEvent.parse(eventId) ?: return null
-        val contacts = repository.allContacts.first().take(3)
-        val contact = contacts.firstOrNull { it.id == event.contactId }
-        if (contact == null) {
-            finalizeIfResolved(event, contacts)
+        val snapshot = incidents.get(event.incidentId) ?: return null
+        if (snapshot.incident.completedAtMs != null) return null
+        val recipient = snapshot.recipients.firstOrNull { it.eventId == eventId } ?: return null
+        val sender = EmergencySmsSender(appContext)
+
+        var status = sender.status(eventId, nowMs)
+        incidents.recordStatus(eventId, status)
+        if (status.isResolved) {
+            finalizeIfResolved(event, snapshot, nowMs)
             return null
         }
         if (
@@ -108,26 +139,21 @@ internal class SafetySmsRetryTask(
         ) {
             return nowMs + BLOCKED_RETRY_MS
         }
-        val smsSetup = SmsDeviceManager(appContext, store).inspect()
-        if (smsSetup !is SmsSetupState.Ready) return nowMs + BLOCKED_RETRY_MS
 
-        val sender = EmergencySmsSender(appContext)
-        val message = when (event.type) {
-            SafetySmsEventType.EMERGENCY -> EmergencyMessageBuilder.build(store.deviceAlias, null)
-            SafetySmsEventType.SOS -> EmergencyMessageBuilder.buildSos(
-                store.deviceAlias,
-                event.occurredAtMs
+        try {
+            sender.queue(
+                eventId = eventId,
+                contact = recipient.asContact(),
+                message = snapshot.incident.message,
+                subscriptionId = snapshot.incident.subscriptionId,
+                nowMs = nowMs
             )
+        } catch (error: RuntimeException) {
+            Log.e(SafetySmsRetryWorker.WORK_TAG, "Unable to queue immutable safety incident", error)
         }
-        sender.queue(
-            eventId = eventId,
-            contact = contact,
-            message = message,
-            subscriptionId = smsSetup.line.subscriptionId,
-            nowMs = nowMs
-        )
-        val status = sender.status(eventId, nowMs)
-        finalizeIfResolved(event, contacts)
+        status = sender.status(eventId, nowMs)
+        incidents.recordStatus(eventId, status)
+        finalizeIfResolved(event, snapshot, nowMs)
         return when (status.state) {
             SmsDispatchState.QUEUED -> status.updatedAtMs + SmsDispatchStore.CALLBACK_TIMEOUT_MS
             SmsDispatchState.FAILED_RETRYABLE -> status.retryAtMs
@@ -136,26 +162,54 @@ internal class SafetySmsRetryTask(
         }
     }
 
-    private fun finalizeIfResolved(event: SafetySmsEvent, contacts: List<com.example.data.Contact>) {
-        if (contacts.isEmpty()) return
+    private suspend fun finalizeIfResolved(
+        event: SafetySmsEvent,
+        originalSnapshot: SafetyIncidentSnapshot,
+        nowMs: Long
+    ) {
+        val snapshot = incidents.get(event.incidentId) ?: originalSnapshot
         val sender = EmergencySmsSender(appContext)
-        val allResolved = contacts.all { contact ->
-            val id = when (event.type) {
-                SafetySmsEventType.EMERGENCY ->
-                    EmergencySmsSender.emergencyEventId(event.occurredAtMs, contact.id)
-                SafetySmsEventType.SOS ->
-                    EmergencySmsSender.sosEventId(event.occurredAtMs, contact.id)
+        val statuses = snapshot.recipients.map { recipient ->
+            sender.status(recipient.eventId, nowMs).also { status ->
+                incidents.recordStatus(recipient.eventId, status)
             }
-            sender.status(id).isResolved
         }
-        if (!allResolved) return
+        if (statuses.isEmpty() || statuses.any { !it.isResolved }) return
+
         when (event.type) {
             SafetySmsEventType.EMERGENCY -> store.markEmergency(event.occurredAtMs)
             SafetySmsEventType.SOS -> store.completeActiveSos(event.occurredAtMs)
+            SafetySmsEventType.DAILY -> {
+                store.markDailyCheckInAlerted(event.occurredAtMs)
+                store.advanceDailyCheckIn(event.occurredAtMs)
+                store.dailyCheckInError = ""
+                DailyCheckInScheduler(appContext).ensureScheduled(nowMs)
+                NotificationManagerCompat.from(appContext).cancel(DailyCheckInTask.DAILY_NOTIFICATION_ID)
+            }
         }
+        incidents.completeAndRedact(event.incidentId, nowMs)
     }
 
     companion object {
         private const val BLOCKED_RETRY_MS = 30 * 60 * 1_000L
     }
+}
+
+internal fun SafetyRecipient.asContact(): Contact = Contact(
+    id = contactId,
+    name = name,
+    phoneNumber = phoneNumber,
+    createdAt = updatedAtMs
+)
+
+internal suspend fun SafetyIncidentRepository.recordStatus(
+    eventId: String,
+    status: SmsDispatchStatus
+) {
+    updateRecipientStatus(
+        eventId = eventId,
+        attemptCount = status.attempt,
+        dispatchState = status.state.name,
+        updatedAtMs = status.updatedAtMs
+    )
 }

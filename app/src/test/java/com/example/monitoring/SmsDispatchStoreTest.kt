@@ -158,6 +158,26 @@ class SmsDispatchStoreTest {
         assertEquals(SmsDispatchState.QUEUED, store.status(EVENT_ID).state)
     }
 
+    @Test
+    fun clearingVisibleHistoryKeepsAnUnresolvedSafetyRetry() {
+        val activeEventId = "emergency:200:2"
+        store.beginAttempt(activeEventId, totalParts = 1, nowMs = 1_000L)
+        val completedAttempt = store.beginAttempt(EVENT_ID, totalParts = 1, nowMs = 1_000L)!!
+        store.recordCallback(
+            SmsCallbackStage.SENT,
+            EVENT_ID,
+            completedAttempt,
+            partIndex = 0,
+            totalParts = 1,
+            resultCode = Activity.RESULT_OK,
+            nowMs = 2_000L
+        )
+
+        store.clearResolved()
+
+        assertEquals(SmsDispatchState.NOT_QUEUED, store.status(EVENT_ID).state)
+        assertEquals(SmsDispatchState.QUEUED, store.status(activeEventId).state)
+    }
     companion object {
         private const val EVENT_ID = "emergency:100:1"
     }

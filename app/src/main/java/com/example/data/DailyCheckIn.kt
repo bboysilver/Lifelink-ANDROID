@@ -59,8 +59,11 @@ object DailyCheckInCalculator {
         val overdueAtMs = responseDeadlineAtMs
             .takeIf { it > nextDueAtMs }
             ?: (nextDueAtMs + RESPONSE_WINDOW_MS)
+        val hasActiveResponseWindow = responseDeadlineAtMs > nextDueAtMs && nextDueAtMs > 0L
         val phase = when {
             !enabled -> DailyCheckInPhase.DISABLED
+            hasActiveResponseWindow && nowMs < overdueAtMs -> DailyCheckInPhase.DUE
+            hasActiveResponseWindow -> DailyCheckInPhase.OVERDUE
             nextDueAtMs <= 0L || nowMs < nextDueAtMs -> DailyCheckInPhase.UPCOMING
             nowMs < overdueAtMs -> DailyCheckInPhase.DUE
             else -> DailyCheckInPhase.OVERDUE

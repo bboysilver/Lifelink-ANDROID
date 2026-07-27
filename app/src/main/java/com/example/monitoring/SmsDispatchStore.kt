@@ -1,5 +1,6 @@
 package com.example.monitoring
 
+import android.annotation.SuppressLint
 import android.app.Activity
 import android.content.Context
 
@@ -43,6 +44,7 @@ enum class SmsCallbackOutcome {
     IGNORED
 }
 
+@SuppressLint("ApplySharedPref")
 class SmsDispatchStore(context: Context) {
     private val preferences = context.getSharedPreferences(FILE_NAME, Context.MODE_PRIVATE)
 
@@ -168,6 +170,15 @@ class SmsDispatchStore(context: Context) {
 
     fun pruneExpired(nowMs: Long = System.currentTimeMillis()): Int = synchronized(LOCK) {
         pruneExpiredLocked(nowMs)
+    }
+
+    fun clearResolved() = synchronized(LOCK) {
+        val eventIds = preferences.getStringSet(KEY_EVENT_IDS, emptySet()).orEmpty()
+        val resolvedIds = eventIds.filter { statusLocked(it).isResolved }
+        if (resolvedIds.isEmpty()) return@synchronized
+        val editor = preferences.edit()
+        resolvedIds.forEach { removeEventLocked(editor, it) }
+        editor.putStringSet(KEY_EVENT_IDS, eventIds - resolvedIds.toSet()).commit()
     }
 
     fun clearAll() = synchronized(LOCK) {

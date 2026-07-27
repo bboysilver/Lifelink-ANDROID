@@ -58,6 +58,19 @@ class DailyCheckInCalculatorTest {
         assertFalse(status.needsResponse)
     }
 
+    @Test
+    fun activeResponseWindowSurvivesAClockMoveBeforeTheOriginalDueTime() {
+        val dueAtMs = utcTime(2026, Calendar.JULY, 22, 9)
+        val status = DailyCheckInCalculator.status(
+            nowMs = dueAtMs - 30 * 60 * 1_000L,
+            enabled = true,
+            nextDueAtMs = dueAtMs,
+            responseDeadlineAtMs = dueAtMs + DailyCheckInCalculator.RESPONSE_WINDOW_MS
+        )
+
+        assertEquals(DailyCheckInPhase.DUE, status.phase)
+        assertTrue(status.needsResponse)
+    }
     private fun utcTime(year: Int, month: Int, day: Int, hour: Int): Long =
         Calendar.getInstance(TimeZone.getTimeZone("UTC")).apply {
             clear()

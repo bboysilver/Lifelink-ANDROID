@@ -126,12 +126,12 @@ class SmsDeviceManager(
             @Suppress("DEPRECATION")
             telephonyManager.isSmsCapable
         }
+        val hasMessagingFeature = Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+            packageManager.hasSystemFeature(PackageManager.FEATURE_TELEPHONY_MESSAGING)
         return SmsCapabilityResolver.isSupported(
             sdkInt = Build.VERSION.SDK_INT,
             hasTelephonyFeature = packageManager.hasSystemFeature(PackageManager.FEATURE_TELEPHONY),
-            hasMessagingFeature = packageManager.hasSystemFeature(
-                PackageManager.FEATURE_TELEPHONY_MESSAGING
-            ),
+            hasMessagingFeature = hasMessagingFeature,
             telephonySmsCapable = telephonySmsCapable
         )
     }

@@ -47,6 +47,7 @@ class LifeLinkRepository(private val db: AppDatabase) {
 
     suspend fun clearLogs() = withContext(Dispatchers.IO) {
         db.eventLogDao().clearLogs()
+        db.safetyIncidentDao().deleteCompletedBefore(Long.MAX_VALUE)
     }
 
     suspend fun deleteLogsBefore(cutoffMs: Long): Int = withContext(Dispatchers.IO) {

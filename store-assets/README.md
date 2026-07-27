@@ -57,5 +57,9 @@ Run:
 python tools\generate_store_assets.py
 ```
 
+The script discovers Malgun Gothic, Apple SD Gothic Neo, or Noto Sans KR/CJK on
+Windows, macOS, and Linux. For a custom licensed font, set
+`LIFELINK_FONT_REGULAR` and `LIFELINK_FONT_BOLD` to the font file paths before
+running it.
 The script also refreshes the legacy launcher PNGs under `app/src/main/res/mipmap-*`.
 Adaptive icon vectors remain under `app/src/main/res/drawable`.

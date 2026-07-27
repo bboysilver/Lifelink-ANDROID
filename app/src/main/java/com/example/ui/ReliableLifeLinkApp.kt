@@ -7,6 +7,7 @@ import android.os.Build
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -22,6 +23,7 @@ import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ListAlt
 import androidx.compose.material.icons.filled.Add
@@ -238,12 +240,12 @@ private fun DashboardTab(
                         if (desiredMonitoring) viewModel.stopMonitoring()
                         else if (canStart) viewModel.startMonitoring()
                     },
-                    modifier = Modifier.testTag("toggle_monitoring_button")
+                    modifier = Modifier.size(56.dp).testTag("toggle_monitoring_button")
                 ) {
                     Icon(
                         if (desiredMonitoring) Icons.Default.PauseCircle else Icons.Default.PlayCircle,
                         contentDescription = if (desiredMonitoring) "모니터링 중지" else "모니터링 시작",
-                        modifier = Modifier.size(36.dp)
+                        modifier = Modifier.size(40.dp)
                     )
                 }
             }
@@ -543,7 +545,7 @@ private fun ContactsTab(viewModel: LifeLinkViewModel) {
                     }
                 },
                 enabled = contacts.size < 3,
-                modifier = Modifier.fillMaxWidth()
+                modifier = Modifier.fillMaxWidth().height(56.dp)
             ) {
                 Icon(Icons.Default.Add, null)
                 Text(" 연락처 등록")
@@ -595,9 +597,12 @@ private fun ContactItem(contact: Contact, onTest: () -> Unit, onDelete: () -> Un
             Column(Modifier.weight(1f)) {
                 Text(contact.name, fontWeight = FontWeight.Bold)
                 Text(contact.phoneNumber)
-                TextButton(onClick = { confirmTest = true }) { Text("테스트 문자 보내기") }
+                TextButton(
+                    onClick = { confirmTest = true },
+                    modifier = Modifier.height(56.dp)
+                ) { Text("테스트 문자 보내기") }
             }
-            IconButton(onClick = onDelete) {
+            IconButton(onClick = onDelete, modifier = Modifier.size(56.dp)) {
                 Icon(Icons.Default.Delete, contentDescription = "삭제", tint = MaterialTheme.colorScheme.error)
             }
         }
@@ -670,7 +675,7 @@ private fun SosCountdownDialog(seconds: Int, onCancel: () -> Unit) {
         title = { Text("SOS 전송까지 ${seconds}초") },
         text = { Text("취소하지 않으면 등록한 보호자에게 도움 요청 문자를 보냅니다.") },
         confirmButton = {
-            Button(onClick = onCancel, modifier = Modifier.fillMaxWidth()) {
+            Button(onClick = onCancel, modifier = Modifier.fillMaxWidth().height(56.dp)) {
                 Text("취소")
             }
         }
@@ -689,7 +694,7 @@ private fun DailyCheckInDialog(onSafe: () -> Unit, onHelp: () -> Unit) {
             }
         },
         dismissButton = {
-            TextButton(onClick = onHelp, modifier = Modifier.fillMaxWidth()) {
+            TextButton(onClick = onHelp, modifier = Modifier.fillMaxWidth().height(56.dp)) {
                 Text("도움이 필요해요", color = MaterialTheme.colorScheme.error)
             }
         }
@@ -703,7 +708,7 @@ private fun PreAlertDialog(onDismiss: () -> Unit) {
         title = { Text("잘 계신가요?") },
         text = { Text("30분 안에 무사함을 확인하지 않으면 등록된 보호자에게 긴급 문자를 보냅니다.") },
         confirmButton = {
-            Button(onClick = onDismiss, modifier = Modifier.fillMaxWidth()) {
+            Button(onClick = onDismiss, modifier = Modifier.fillMaxWidth().height(56.dp)) {
                 Text("무사합니다", fontWeight = FontWeight.Bold)
             }
         }
@@ -711,19 +716,26 @@ private fun PreAlertDialog(onDismiss: () -> Unit) {
 }
 
 @Composable
-private fun StartupSetupDialog(onComplete: () -> Unit) {
+internal fun StartupSetupDialog(onComplete: () -> Unit) {
     AlertDialog(
         onDismissRequest = {},
         icon = { Icon(Icons.Default.Favorite, null, tint = Color(0xFFF0645A)) },
         title = { Text("라이프링크 시작하기") },
         text = {
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Column(
+                modifier = Modifier.verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
                 Text("한 번 설정하면 휴대전화 활동을 백그라운드에서 확인합니다.")
                 Text("설정 시간 동안 활동이 없거나 매일 안부 확인에 응답하지 않으면 최대 3명의 보호자에게 SIM 문자를 보냅니다. 홈 화면 SOS로 직접 도움을 요청할 수도 있습니다.")
                 Text("문자·SIM 상태·활동 감지·알림 권한은 다음 화면에서 각각 설명하고 요청합니다. 위치 정보는 수집하지 않습니다.", fontSize = 16.sp)
             }
         },
-        confirmButton = { Button(onClick = onComplete) { Text("설정 시작") } }
+        confirmButton = {
+            Button(onClick = onComplete, modifier = Modifier.height(56.dp)) {
+                Text("설정 시작")
+            }
+        }
     )
 }
 
