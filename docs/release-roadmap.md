@@ -1,6 +1,6 @@
 # LifeLink 출시 로드맵
 
-기준 버전: Android 2.2.5 (26)
+기준 버전: Android 2.2.6 (27)
 
 ## 현재 목표: Closed testing
 
@@ -10,7 +10,7 @@
 - GitHub Actions의 `Signed Android release`에서 생성한 서명 AAB만 사용한다.
 - 최종 AAB Manifest에 `com.google.android.gms.permission.AD_ID`가 없어야 한다.
 - Play Console의 광고 ID 및 광고 선언은 모두 `No`로 유지한다.
-- 기존 Closed testing 및 Internal testing의 오래된 아티팩트는 2.2.5 (26)로 교체하거나 비활성화한다.
+- 기존 Closed testing 및 Internal testing의 오래된 아티팩트는 2.2.6 (27)로 교체하거나 비활성화한다.
 - SMS 권한 용도는 고령자 안전을 위한 물리적 안전·긴급 알림으로 설명한다.
 - Foreground service는 실제 Manifest와 동일하게 `health`만 선언한다.
 - 개인정보처리방침 URL은 `https://bboysilver.github.io/Lifelink-ANDROID/privacy-policy.html`을 사용한다.

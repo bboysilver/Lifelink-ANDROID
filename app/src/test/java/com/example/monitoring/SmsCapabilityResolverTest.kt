@@ -6,8 +6,8 @@ import org.junit.Test
 
 class SmsCapabilityResolverTest {
     @Test
-    fun android7Through12UseTheLegacyTelephonyFeature() {
-        listOf(24, 28, 31, 32).forEach { sdk ->
+    fun android6Through12UseTheLegacyTelephonyFeature() {
+        listOf(23, 24, 28, 31, 32).forEach { sdk ->
             assertTrue(
                 "SDK $sdk should support SMS with legacy telephony",
                 SmsCapabilityResolver.isSupported(

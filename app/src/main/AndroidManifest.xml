@@ -1,12 +1,13 @@
 <?xml version="1.0" encoding="utf-8"?>
-<manifest xmlns:android="http://schemas.android.com/apk/res/android"
-    xmlns:tools="http://schemas.android.com/tools">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
-    <!-- Direct SIM messaging is the core safety path, so SMS-incapable devices are unsupported. -->
+    <!-- Keep the app installable on Wi-Fi tablets; runtime checks gate SIM-based safety features. -->
     <uses-feature
         android:name="android.hardware.telephony"
-        android:required="true"
-        tools:ignore="UnnecessaryRequiredFeature" />
+        android:required="false" />
+    <uses-feature
+        android:name="android.hardware.telephony.messaging"
+        android:required="false" />
 
     <uses-permission android:name="android.permission.SEND_SMS" />
     <uses-permission android:name="android.permission.READ_PHONE_STATE" />

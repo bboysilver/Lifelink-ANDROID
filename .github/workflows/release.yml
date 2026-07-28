@@ -39,6 +39,22 @@ jobs:
           manifest="app/build/intermediates/merged_manifest/release/processReleaseMainManifest/AndroidManifest.xml"
           test -f "$manifest"
           grep -q 'android.permission.SEND_SMS' "$manifest"
+          MANIFEST="$manifest" python3 - <<'PY'
+          import os
+          import xml.etree.ElementTree as ET
+
+          android = "{http://schemas.android.com/apk/res/android}"
+          root = ET.parse(os.environ["MANIFEST"]).getroot()
+          uses_sdk = root.find("uses-sdk")
+          assert uses_sdk is not None
+          assert uses_sdk.get(android + "minSdkVersion") == "23"
+          features = {
+              node.get(android + "name"): node.get(android + "required")
+              for node in root.findall("uses-feature")
+          }
+          assert features.get("android.hardware.telephony") == "false"
+          assert features.get("android.hardware.telephony.messaging") == "false"
+          PY
           for forbidden in \
             'com.google.android.gms.permission.AD_ID' \
             'android.permission.INTERNET' \
