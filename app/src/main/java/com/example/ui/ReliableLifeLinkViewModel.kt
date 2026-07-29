@@ -3,6 +3,7 @@ package com.example.ui
 import android.Manifest
 import android.app.Application
 import android.content.pm.PackageManager
+import android.os.Build
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.ViewModel
@@ -15,6 +16,8 @@ import com.example.data.EventLog
 import com.example.data.LifeLinkRepository
 import com.example.data.MonitoringRuntimeState
 import com.example.data.MonitoringStore
+import com.example.data.TestSmsVerification
+import com.example.data.TestSmsVerificationState
 import com.example.monitoring.EmergencyMessageBuilder
 import com.example.monitoring.DailyCheckInScheduler
 import com.example.monitoring.DailyCheckInWorker
@@ -117,6 +120,20 @@ class LifeLinkViewModel(application: Application) : AndroidViewModel(application
     private val _setupCompleted = MutableStateFlow(false)
     val setupCompleted: StateFlow<Boolean> = _setupCompleted.asStateFlow()
 
+    private val _setupStep = MutableStateFlow(SetupStep.DEVICE)
+    val setupStep: StateFlow<SetupStep> = _setupStep.asStateFlow()
+
+    private val _testSmsVerification = MutableStateFlow(
+        TestSmsVerification(TestSmsVerificationState.NOT_SENT, -1, "", "")
+    )
+    val testSmsVerification: StateFlow<TestSmsVerification> = _testSmsVerification.asStateFlow()
+
+    private val _debugMonitorMinutes = MutableStateFlow(0)
+    val debugMonitorMinutes: StateFlow<Int> = _debugMonitorMinutes.asStateFlow()
+
+    private val _userNotice = MutableStateFlow("")
+    val userNotice: StateFlow<String> = _userNotice.asStateFlow()
+
     private var tickerJob: Job? = null
     private var sosJob: Job? = null
     private var lastObservedActivityMs = 0L
@@ -134,8 +151,14 @@ class LifeLinkViewModel(application: Application) : AndroidViewModel(application
                 LifeLinkRepository.KEY_SETUP_COMPLETED,
                 "false"
             ).toBoolean()
-            if (legacySetupCompleted) monitoringStore.completeSetup()
-            _setupCompleted.value = monitoringStore.isSetupCompleted
+            if (legacySetupCompleted && !monitoringStore.isSetupCompleted) {
+                monitoringStore.beginSetupReview()
+            }
+            if (monitoringStore.isSetupCompleted && !monitoringStore.isSetupCurrent) {
+                MonitoringService.stop(context)
+                monitoringStore.beginSetupReview()
+            }
+            _setupCompleted.value = monitoringStore.isSetupCurrent
             monitoringStore.initializeDeadlineIfMissing()
             dailyCheckInScheduler.ensureScheduled()
             MaintenanceWorker.ensureScheduled(context)
@@ -145,13 +168,30 @@ class LifeLinkViewModel(application: Application) : AndroidViewModel(application
     }
 
     fun ensureMonitoringStarted() {
-        if (!monitoringStore.isSetupCompleted || !monitoringStore.desiredEnabled) return
-        if (readySmsLineOrLog() == null) return
+        if (!monitoringStore.isSetupCurrent || !monitoringStore.desiredEnabled) return
+        val reason = monitoringBlockReason()
+        if (reason != null) {
+            monitoringStore.markServiceError(reason)
+            _userNotice.value = reason
+            refreshUi()
+            return
+        }
         startServiceWithoutReset()
     }
 
     fun startMonitoring() {
-        if (!monitoringStore.isSetupCompleted || readySmsLineOrLog() == null) return
+        if (!monitoringStore.isSetupCurrent) {
+            _userNotice.value = "초기 안전 설정을 완료해 주세요."
+            return
+        }
+        val reason = monitoringBlockReason()
+        if (reason != null) {
+            _userNotice.value = reason
+            logValidationError(reason)
+            refreshUi()
+            return
+        }
+        _userNotice.value = ""
         monitoringStore.beginStart(reason = "사용자가 모니터링 시작")
         startServiceWithoutReset()
         viewModelScope.launch {
@@ -300,6 +340,7 @@ class LifeLinkViewModel(application: Application) : AndroidViewModel(application
             return
         }
         _monitorHours.value = hours
+        monitoringStore.debugMonitorMinutes = 0
         monitoringStore.monitorHours = hours
         if (monitoringStore.desiredEnabled) monitoringStore.resetDeadline(reason = "안심 시간 변경")
         viewModelScope.launch {
@@ -316,14 +357,45 @@ class LifeLinkViewModel(application: Application) : AndroidViewModel(application
         }
     }
 
-    fun completeSetup() {
+    fun advanceSetup(step: SetupStep) {
+        monitoringStore.setSetupStep(step.ordinal)
+        _setupStep.value = step
+        _userNotice.value = ""
+    }
+
+    fun restartSetup() {
+        MonitoringService.stop(context)
+        monitoringStore.beginSetupReview()
+        _setupCompleted.value = false
+        _setupStep.value = SetupStep.DEVICE
+        _userNotice.value = "필수 안전 설정을 다시 확인합니다. 기존 연락처는 유지됩니다."
+        refreshUi()
+    }
+
+    fun completeSetupAndStart() {
+        val reason = monitoringBlockReason()
+        if (reason != null) {
+            _userNotice.value = reason
+            logValidationError(reason)
+            return
+        }
         monitoringStore.completeSetup()
-        monitoringStore.setDesiredEnabled(true)
+        monitoringStore.beginStart(reason = "초기 설정 완료")
         _setupCompleted.value = true
+        _setupStep.value = SetupStep.MONITORING
+        _userNotice.value = ""
+        startServiceWithoutReset()
         viewModelScope.launch {
             repository.saveSetting(LifeLinkRepository.KEY_SETUP_COMPLETED, "true")
-            repository.insertLog("SAFETY_INIT", "초기 설정을 완료했습니다. 필수 권한 확인 후 모니터링을 시작합니다.")
+            repository.insertLog("SAFETY_INIT", "시험 문자 확인 후 초기 설정과 모니터링을 시작했습니다.")
         }
+        refreshUi()
+    }
+
+    fun updateDebugMonitorMinutes(minutes: Int) {
+        monitoringStore.debugMonitorMinutes = minutes
+        _debugMonitorMinutes.value = monitoringStore.debugMonitorMinutes
+        if (monitoringStore.desiredEnabled) monitoringStore.resetDeadline(reason = "개발 테스트 시간 변경")
         refreshUi()
     }
 
@@ -358,6 +430,8 @@ class LifeLinkViewModel(application: Application) : AndroidViewModel(application
 
         viewModelScope.launch(Dispatchers.IO) {
             val eventId = EmergencySmsSender.testEventId(nowMs, contact.id)
+            monitoringStore.markTestSmsPending(contact.id, eventId)
+            refreshUi()
             try {
                 val result = EmergencySmsSender(context).queue(
                     eventId = eventId,
@@ -376,16 +450,26 @@ class LifeLinkViewModel(application: Application) : AndroidViewModel(application
                     }
                 )
             } catch (error: Exception) {
+                monitoringStore.recordTestSmsResult(
+                    eventId,
+                    TestSmsVerificationState.FAILED,
+                    "시험 문자 발송 요청에 실패했습니다. SIM과 통신 상태를 확인해 주세요."
+                )
                 repository.insertLog(
                     "SMS_FAILED",
                     "${contact.name} 보호자 테스트 문자 요청에 실패했습니다.",
                     error.message ?: "알 수 없는 오류"
                 )
+                refreshUi()
             }
         }
     }
     fun deleteContact(contact: Contact) {
+        if (monitoringStore.testSmsVerification.contactId == contact.id) {
+            monitoringStore.invalidateTestSmsVerification()
+        }
         viewModelScope.launch { repository.deleteContact(contact) }
+        refreshUi()
     }
 
     fun clearAllLogs() {
@@ -398,6 +482,9 @@ class LifeLinkViewModel(application: Application) : AndroidViewModel(application
     }
 
     fun selectSmsLine(subscriptionId: Int) {
+        if (monitoringStore.smsSubscriptionId != subscriptionId) {
+            monitoringStore.invalidateTestSmsVerification()
+        }
         monitoringStore.smsSubscriptionId = subscriptionId
         refreshSmsSetup()
         val state = _smsSetupState.value
@@ -408,6 +495,26 @@ class LifeLinkViewModel(application: Application) : AndroidViewModel(application
             ensureMonitoringStarted()
         }
     }
+
+    private fun monitoringBlockReason(): String? = SafetyReadiness.monitoringBlockReason(
+        smsSetupState = smsDeviceManager.inspect(),
+        smsPermissionGranted = ContextCompat.checkSelfPermission(
+            context,
+            Manifest.permission.SEND_SMS
+        ) == PackageManager.PERMISSION_GRANTED,
+        phonePermissionGranted = ContextCompat.checkSelfPermission(
+            context,
+            Manifest.permission.READ_PHONE_STATE
+        ) == PackageManager.PERMISSION_GRANTED,
+        activityPermissionGranted = Build.VERSION.SDK_INT < Build.VERSION_CODES.Q ||
+            ContextCompat.checkSelfPermission(context, Manifest.permission.ACTIVITY_RECOGNITION) ==
+            PackageManager.PERMISSION_GRANTED,
+        notificationPermissionGranted = Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU ||
+            ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) ==
+            PackageManager.PERMISSION_GRANTED,
+        hasEmergencyContacts = contacts.value.isNotEmpty(),
+        testSmsState = monitoringStore.testSmsVerification.state
+    )
 
     private fun readySmsLineOrLog(): com.example.monitoring.SmsLine? {
         refreshSmsSetup()
@@ -465,6 +572,9 @@ class LifeLinkViewModel(application: Application) : AndroidViewModel(application
             ""
         }
         _dailyCheckInError.value = monitoringStore.dailyCheckInError
+        _setupStep.value = SetupStep.fromStored(monitoringStore.setupStep)
+        _testSmsVerification.value = monitoringStore.testSmsVerification
+        _debugMonitorMinutes.value = monitoringStore.debugMonitorMinutes
         _remainingSeconds.value = snapshot.remainingSeconds
         _isMonitoring.value = snapshot.isRunning
         _desiredMonitoring.value = snapshot.desiredEnabled

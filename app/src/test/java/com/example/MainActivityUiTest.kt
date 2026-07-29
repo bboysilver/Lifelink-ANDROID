@@ -18,9 +18,9 @@ class MainActivityUiTest {
     val composeRule = createAndroidComposeRule<MainActivity>()
 
     @Test
-    fun `setup opens the real dashboard`() {
-        composeRule.onNodeWithText("라이프링크 시작하기").assertIsDisplayed()
-        composeRule.onNodeWithText("설정 시작").performClick()
-        composeRule.onNodeWithText("안전 기능 설정을 확인해 주세요").assertIsDisplayed()
+    fun `setup explains device compatibility before safety features`() {
+        composeRule.onNodeWithText("기기 호환성 확인").assertIsDisplayed()
+        composeRule.onNodeWithText("기기 상태 다시 확인").performClick()
+        composeRule.onNodeWithText("기기 호환성 확인").assertIsDisplayed()
     }
 }

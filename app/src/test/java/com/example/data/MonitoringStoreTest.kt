@@ -127,4 +127,47 @@ class MonitoringStoreTest {
         store.completeActiveSos(2_000L)
         assertEquals(0L, store.sosEventMs)
     }
+    @Test
+    fun setupProgressAndTestVerificationSurviveRecreation() {
+        val store = MonitoringStore(context)
+        store.setSetupStep(SetupStepValue.TEST_SMS)
+        store.markTestSmsPending(contactId = 7, eventId = "test:100:7")
+        store.recordTestSmsResult(
+            eventId = "test:100:7",
+            state = TestSmsVerificationState.SUCCESS,
+            message = "확인됨"
+        )
+
+        val restored = MonitoringStore(context)
+        assertEquals(SetupStepValue.TEST_SMS, restored.setupStep)
+        assertEquals(TestSmsVerificationState.SUCCESS, restored.testSmsVerification.state)
+        assertEquals(7, restored.testSmsVerification.contactId)
+    }
+
+    @Test
+    fun setupIsCurrentOnlyAfterTheVerifiedFlowCompletes() {
+        val store = MonitoringStore(context)
+        store.beginSetupReview()
+        assertFalse(store.isSetupCurrent)
+
+        store.completeSetup()
+
+        assertTrue(store.isSetupCurrent)
+        assertEquals(MonitoringStore.CURRENT_ONBOARDING_VERSION, store.onboardingVersion)
+    }
+
+    @Test
+    fun debugMinuteDeadlineIsUsedOnlyForExplicitDebugSelection() {
+        val store = MonitoringStore(context)
+        store.monitorHours = 6
+        store.debugMonitorMinutes = 1
+
+        store.beginStart(nowMs = 10_000L)
+
+        assertEquals(70_000L, store.deadlineMs)
+    }
+
+    private object SetupStepValue {
+        const val TEST_SMS = 4
+    }
 }

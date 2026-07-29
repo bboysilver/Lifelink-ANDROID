@@ -2,9 +2,19 @@ package com.example.data
 
 import android.annotation.SuppressLint
 import android.content.Context
+import com.example.BuildConfig
 import kotlin.math.max
 
 enum class MonitoringRuntimeState { STARTING, RUNNING, ERROR, STOPPED }
+
+enum class TestSmsVerificationState { NOT_SENT, PENDING, SUCCESS, FAILED }
+
+data class TestSmsVerification(
+    val state: TestSmsVerificationState,
+    val contactId: Int,
+    val eventId: String,
+    val message: String
+)
 
 data class MonitoringSnapshot(
     val desiredEnabled: Boolean,
@@ -85,11 +95,94 @@ class MonitoringStore(context: Context) {
     val isSetupCompleted: Boolean
         get() = preferences.getBoolean(KEY_SETUP_COMPLETED, false)
 
+    val setupStep: Int
+        get() = preferences.getInt(KEY_SETUP_STEP, 0).coerceIn(0, 5)
+
+    val onboardingVersion: Int
+        get() = preferences.getInt(KEY_ONBOARDING_VERSION, 0)
+
+    val isSetupCurrent: Boolean
+        get() = isSetupCompleted && onboardingVersion >= CURRENT_ONBOARDING_VERSION
+
+    val testSmsVerification: TestSmsVerification
+        get() {
+            val stateName = preferences.getString(KEY_TEST_SMS_STATE, null)
+            val state = TestSmsVerificationState.entries.firstOrNull { it.name == stateName }
+                ?: TestSmsVerificationState.NOT_SENT
+            return TestSmsVerification(
+                state = state,
+                contactId = preferences.getInt(KEY_TEST_SMS_CONTACT_ID, -1),
+                eventId = preferences.getString(KEY_TEST_SMS_EVENT_ID, "").orEmpty(),
+                message = preferences.getString(KEY_TEST_SMS_MESSAGE, "").orEmpty()
+            )
+        }
+
+    var debugMonitorMinutes: Int
+        get() = if (BuildConfig.DEBUG) preferences.getInt(KEY_DEBUG_MONITOR_MINUTES, 0) else 0
+        set(value) {
+            if (BuildConfig.DEBUG) {
+                preferences.edit()
+                    .putInt(KEY_DEBUG_MONITOR_MINUTES, value.takeIf { it == 1 || it == 5 } ?: 0)
+                    .apply()
+            }
+        }
+
     val deadlineMs: Long
         get() = preferences.getLong(KEY_DEADLINE_MS, 0L)
 
+    fun setSetupStep(step: Int) {
+        preferences.edit().putInt(KEY_SETUP_STEP, step.coerceIn(0, 5)).apply()
+    }
+
+    fun beginSetupReview() {
+        preferences.edit()
+            .putBoolean(KEY_SETUP_COMPLETED, false)
+            .putBoolean(KEY_DESIRED_ENABLED, false)
+            .putString(KEY_RUNTIME_STATE, MonitoringRuntimeState.STOPPED.name)
+            .putInt(KEY_SETUP_STEP, 0)
+            .putString(KEY_TEST_SMS_STATE, TestSmsVerificationState.NOT_SENT.name)
+            .remove(KEY_TEST_SMS_CONTACT_ID)
+            .remove(KEY_TEST_SMS_EVENT_ID)
+            .remove(KEY_TEST_SMS_MESSAGE)
+            .apply()
+    }
+
     fun completeSetup() {
-        preferences.edit().putBoolean(KEY_SETUP_COMPLETED, true).apply()
+        preferences.edit()
+            .putBoolean(KEY_SETUP_COMPLETED, true)
+            .putInt(KEY_ONBOARDING_VERSION, CURRENT_ONBOARDING_VERSION)
+            .putInt(KEY_SETUP_STEP, 5)
+            .apply()
+    }
+
+    fun invalidateTestSmsVerification() {
+        preferences.edit()
+            .putString(KEY_TEST_SMS_STATE, TestSmsVerificationState.NOT_SENT.name)
+            .remove(KEY_TEST_SMS_CONTACT_ID)
+            .remove(KEY_TEST_SMS_EVENT_ID)
+            .remove(KEY_TEST_SMS_MESSAGE)
+            .apply()
+    }
+
+    fun markTestSmsPending(contactId: Int, eventId: String) {
+        preferences.edit()
+            .putString(KEY_TEST_SMS_STATE, TestSmsVerificationState.PENDING.name)
+            .putInt(KEY_TEST_SMS_CONTACT_ID, contactId)
+            .putString(KEY_TEST_SMS_EVENT_ID, eventId)
+            .putString(KEY_TEST_SMS_MESSAGE, "시험 문자 발송 결과를 확인하고 있습니다.")
+            .apply()
+    }
+
+    fun recordTestSmsResult(
+        eventId: String,
+        state: TestSmsVerificationState,
+        message: String
+    ) {
+        if (testSmsVerification.eventId != eventId) return
+        preferences.edit()
+            .putString(KEY_TEST_SMS_STATE, state.name)
+            .putString(KEY_TEST_SMS_MESSAGE, message)
+            .apply()
     }
 
     fun setDesiredEnabled(enabled: Boolean) {
@@ -101,7 +194,7 @@ class MonitoringStore(context: Context) {
     }
 
     fun beginStart(nowMs: Long = System.currentTimeMillis(), reason: String = "모니터링 시작") {
-        val newDeadline = DeadlineCalculator.deadlineMs(nowMs, monitorHours)
+        val newDeadline = configuredDeadlineMs(nowMs)
         preferences.edit()
             .putBoolean(KEY_DESIRED_ENABLED, true)
             .putString(KEY_RUNTIME_STATE, MonitoringRuntimeState.STARTING.name)
@@ -125,7 +218,7 @@ class MonitoringStore(context: Context) {
     }
 
     fun resetDeadline(nowMs: Long = System.currentTimeMillis(), reason: String): Long {
-        val newDeadline = DeadlineCalculator.deadlineMs(nowMs, monitorHours)
+        val newDeadline = configuredDeadlineMs(nowMs)
         preferences.edit()
             .putLong(KEY_LAST_ACTIVITY_MS, nowMs)
             .putString(KEY_LAST_ACTIVITY_REASON, reason)
@@ -136,6 +229,15 @@ class MonitoringStore(context: Context) {
 
     fun initializeDeadlineIfMissing(nowMs: Long = System.currentTimeMillis()) {
         if (desiredEnabled && deadlineMs <= 0L) resetDeadline(nowMs, "초기 설정")
+    }
+
+    private fun configuredDeadlineMs(nowMs: Long): Long {
+        val debugMinutes = debugMonitorMinutes
+        return if (debugMinutes > 0) {
+            nowMs + debugMinutes * 60_000L
+        } else {
+            DeadlineCalculator.deadlineMs(nowMs, monitorHours)
+        }
     }
 
     fun markServiceStarting(nowMs: Long = System.currentTimeMillis()) {
@@ -404,6 +506,13 @@ class MonitoringStore(context: Context) {
         // Keep the existing preference key so upgrades preserve the user's intent.
         private const val KEY_DESIRED_ENABLED = "monitoring_enabled"
         private const val KEY_SETUP_COMPLETED = "setup_completed"
+        private const val KEY_SETUP_STEP = "setup_step"
+        private const val KEY_ONBOARDING_VERSION = "onboarding_version"
+        private const val KEY_TEST_SMS_STATE = "test_sms_state"
+        private const val KEY_TEST_SMS_CONTACT_ID = "test_sms_contact_id"
+        private const val KEY_TEST_SMS_EVENT_ID = "test_sms_event_id"
+        private const val KEY_TEST_SMS_MESSAGE = "test_sms_message"
+        private const val KEY_DEBUG_MONITOR_MINUTES = "debug_monitor_minutes"
         private const val KEY_DEADLINE_MS = "deadline_ms"
         private const val KEY_LAST_ACTIVITY_MS = "last_activity_ms"
         private const val KEY_LAST_ACTIVITY_REASON = "last_activity_reason"
@@ -429,6 +538,7 @@ class MonitoringStore(context: Context) {
         private const val KEY_ACTIVE_SOS_EVENT_MS = "active_sos_event_ms"
         private const val INVALID_SUBSCRIPTION_ID = -1
         private const val DEFAULT_DEVICE_ALIAS = "라이프링크 사용자"
+        const val CURRENT_ONBOARDING_VERSION = 1
         const val HEARTBEAT_TIMEOUT_MS = 150_000L
         const val START_TIMEOUT_MS = 30_000L
         private val SOS_LOCK = Any()

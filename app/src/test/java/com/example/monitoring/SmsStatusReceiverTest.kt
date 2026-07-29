@@ -11,6 +11,8 @@ import androidx.work.WorkManager
 import androidx.work.testing.WorkManagerTestInitHelper
 import com.example.data.AppDatabase
 import com.example.data.Contact
+import com.example.data.MonitoringStore
+import com.example.data.TestSmsVerificationState
 import com.example.data.SafetyIncidentRepository
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -33,6 +35,10 @@ class SmsStatusReceiverTest {
     fun setUp() {
         context = ApplicationProvider.getApplicationContext()
         context.getSharedPreferences(SmsDispatchStore.FILE_NAME, Context.MODE_PRIVATE)
+            .edit()
+            .clear()
+            .commit()
+        context.getSharedPreferences("lifelink_monitoring", Context.MODE_PRIVATE)
             .edit()
             .clear()
             .commit()
@@ -65,6 +71,30 @@ class SmsStatusReceiverTest {
         awaitState(SmsDispatchState.SENT)
     }
 
+
+    @Test
+    fun successfulTestSmsCallbackCompletesOnboardingVerification() = runBlocking {
+        val eventId = "test:100:7"
+        val monitoringStore = MonitoringStore(context)
+        monitoringStore.markTestSmsPending(contactId = 7, eventId = eventId)
+        val attempt = store.beginAttempt(eventId, totalParts = 1, nowMs = 1_000L)!!
+
+        sendSentCallback(
+            attempt = attempt,
+            partIndex = 0,
+            totalParts = 1,
+            resultCode = Activity.RESULT_OK,
+            eventId = eventId
+        )
+
+        awaitState(SmsDispatchState.SENT, eventId)
+        withTimeout(3_000L) {
+            while (monitoringStore.testSmsVerification.state != TestSmsVerificationState.SUCCESS) {
+                delay(10L)
+            }
+        }
+        assertEquals(7, monitoringStore.testSmsVerification.contactId)
+    }
 
     @Test
     fun dailyFailureSchedulesDurableRetryWork() = runBlocking {

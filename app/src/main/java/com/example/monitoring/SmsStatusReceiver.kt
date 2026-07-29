@@ -7,6 +7,8 @@ import android.content.Intent
 import android.telephony.SmsManager
 import com.example.data.AppDatabase
 import com.example.data.LifeLinkRepository
+import com.example.data.MonitoringStore
+import com.example.data.TestSmsVerificationState
 import com.example.data.SafetyIncidentRepository
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -68,6 +70,7 @@ class SmsStatusReceiver : BroadcastReceiver() {
                     SafetyIncidentRepository(AppDatabase.getDatabase(context.applicationContext))
                         .recordStatus(eventId, status)
                 }
+                recordTestVerification(context.applicationContext, eventId, outcome)
                 logOutcome(
                     context = context.applicationContext,
                     eventId = eventId,
@@ -75,9 +78,36 @@ class SmsStatusReceiver : BroadcastReceiver() {
                     contactName = contactName,
                     phoneSuffix = phoneSuffix,
                     resultCode = callbackResultCode
-                )            } finally {
+                )
+            } finally {
                 pendingResult.finish()
             }
+        }
+    }
+
+    private fun recordTestVerification(
+        context: Context,
+        eventId: String,
+        outcome: SmsCallbackOutcome
+    ) {
+        if (!SmsDispatchStore.isTestEvent(eventId)) return
+        val store = MonitoringStore(context)
+        when (outcome) {
+            SmsCallbackOutcome.SENT,
+            SmsCallbackOutcome.DELIVERED -> store.recordTestSmsResult(
+                eventId,
+                TestSmsVerificationState.SUCCESS,
+                "시험 문자 발송이 확인되었습니다."
+            )
+            SmsCallbackOutcome.FAILED_RETRYABLE,
+            SmsCallbackOutcome.FAILED_FINAL -> store.recordTestSmsResult(
+                eventId,
+                TestSmsVerificationState.FAILED,
+                "시험 문자 발송에 실패했습니다. SIM과 통신 상태를 확인한 뒤 다시 시도해 주세요."
+            )
+            SmsCallbackOutcome.DELIVERY_UNCONFIRMED,
+            SmsCallbackOutcome.PENDING,
+            SmsCallbackOutcome.IGNORED -> Unit
         }
     }
 
@@ -105,7 +135,11 @@ class SmsStatusReceiver : BroadcastReceiver() {
             )
             SmsCallbackOutcome.FAILED_RETRYABLE -> repository.insertLog(
                 "SMS_FAILED",
-                "$contactName 보호자 문자 발송에 실패해 5분 뒤 다시 시도합니다.",
+                if (isTest) {
+                    "$contactName 보호자 시험 문자 발송에 실패했습니다. 자동 재시도하지 않습니다."
+                } else {
+                    "$contactName 보호자 문자 발송에 실패해 5분 뒤 다시 시도합니다."
+                },
                 "$maskedPhone, 오류: ${resultDescription(resultCode)}"
             )
             SmsCallbackOutcome.FAILED_FINAL -> repository.insertLog(

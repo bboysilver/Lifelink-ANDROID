@@ -72,6 +72,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
+import com.example.BuildConfig
 import com.example.data.Contact
 import com.example.data.EventLog
 import com.example.data.MonitoringRuntimeState
@@ -86,6 +87,10 @@ import java.util.Locale
 fun LifeLinkApp(viewModel: LifeLinkViewModel) {
     val context = LocalContext.current
     val setupCompleted by viewModel.setupCompleted.collectAsState()
+    val setupStep by viewModel.setupStep.collectAsState()
+    val testSmsVerification by viewModel.testSmsVerification.collectAsState()
+    val contacts by viewModel.contacts.collectAsState()
+    val monitorHours by viewModel.monitorHours.collectAsState()
     val alertState by viewModel.alertState.collectAsState()
     val smsSetupState by viewModel.smsSetupState.collectAsState()
     val dailyCheckInDue by viewModel.dailyCheckInDue.collectAsState()
@@ -126,7 +131,40 @@ fun LifeLinkApp(viewModel: LifeLinkViewModel) {
         if (setupCompleted && permissionsReady) viewModel.ensureMonitoringStarted()
     }
 
-    if (!setupCompleted) StartupSetupDialog(onComplete = viewModel::completeSetup)
+    if (!setupCompleted) {
+        SetupWizardDialog(
+            step = setupStep,
+            smsSetupState = smsSetupState,
+            contacts = contacts,
+            testSmsVerification = testSmsVerification,
+            monitorHours = monitorHours,
+            smsGranted = hasSmsPermission(context),
+            phoneGranted = hasPhoneStatePermission(context),
+            activityGranted = hasActivityPermission(context),
+            notificationGranted = hasNotificationPermission(context),
+            onRefreshDevice = viewModel::refreshSmsSetup,
+            onSelectSmsLine = viewModel::selectSmsLine,
+            onAddContact = viewModel::addContact,
+            onRequestSms = { smsPermissionLauncher.launch(Manifest.permission.SEND_SMS) },
+            onRequestPhone = {
+                phonePermissionLauncher.launch(Manifest.permission.READ_PHONE_STATE)
+            },
+            onRequestActivity = {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                    activityPermissionLauncher.launch(Manifest.permission.ACTIVITY_RECOGNITION)
+                }
+            },
+            onRequestNotification = {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                    notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+                }
+            },
+            onSendTestSms = viewModel::sendTestSms,
+            onSetHours = viewModel::updateMonitorHours,
+            onAdvance = viewModel::advanceSetup,
+            onComplete = viewModel::completeSetupAndStart
+        )
+    }
     when {
         sosCountdownSeconds > 0 -> SosCountdownDialog(
             seconds = sosCountdownSeconds,
@@ -184,7 +222,8 @@ fun LifeLinkApp(viewModel: LifeLinkViewModel) {
                         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
                             notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
                         }
-                    }
+                    },
+                    openSetup = viewModel::restartSetup
                 )
                 1 -> ContactsTab(viewModel)
                 else -> LogsTab(viewModel)
@@ -201,7 +240,8 @@ private fun DashboardTab(
     requestSmsPermission: () -> Unit,
     requestPhonePermission: () -> Unit,
     requestActivityPermission: () -> Unit,
-    requestNotificationPermission: () -> Unit
+    requestNotificationPermission: () -> Unit,
+    openSetup: () -> Unit
 ) {
     val context = LocalContext.current
     val remainingSeconds by viewModel.remainingSeconds.collectAsState()
@@ -218,8 +258,26 @@ private fun DashboardTab(
     val dailyScheduleText by viewModel.dailyScheduleText.collectAsState()
     val dailyCheckInError by viewModel.dailyCheckInError.collectAsState()
     val contacts by viewModel.contacts.collectAsState()
+    val testSmsVerification by viewModel.testSmsVerification.collectAsState()
+    val debugMonitorMinutes by viewModel.debugMonitorMinutes.collectAsState()
+    val userNotice by viewModel.userNotice.collectAsState()
     val smsReady = smsSetupState is SmsSetupState.Ready
-    val canStart = permissionsReady && smsReady
+    val monitoringActive = isMonitoring || runtimeState == MonitoringRuntimeState.STARTING
+    val monitoringBlockReason = SafetyReadiness.monitoringBlockReason(
+        smsSetupState = smsSetupState,
+        smsPermissionGranted = hasSmsPermission(context),
+        phonePermissionGranted = hasPhoneStatePermission(context),
+        activityPermissionGranted = hasActivityPermission(context),
+        notificationPermissionGranted = hasNotificationPermission(context),
+        hasEmergencyContacts = contacts.isNotEmpty(),
+        testSmsState = testSmsVerification.state
+    )
+    val sosBlockReason = SafetyReadiness.sosBlockReason(
+        smsSetupState = smsSetupState,
+        smsPermissionGranted = hasSmsPermission(context),
+        hasEmergencyContacts = contacts.isNotEmpty()
+    )
+    val canStart = permissionsReady && smsReady && monitoringBlockReason == null
 
     LazyColumn(
         modifier = Modifier.fillMaxSize().padding(20.dp),
@@ -235,18 +293,18 @@ private fun DashboardTab(
                     Icon(Icons.Default.Favorite, null, tint = Color(0xFFF0645A), modifier = Modifier.size(30.dp))
                     Text("  라이프링크", fontSize = 24.sp, fontWeight = FontWeight.Black)
                 }
-                IconButton(
+                OutlinedButton(
                     onClick = {
-                        if (desiredMonitoring) viewModel.stopMonitoring()
-                        else if (canStart) viewModel.startMonitoring()
+                        if (monitoringActive) viewModel.stopMonitoring() else viewModel.startMonitoring()
                     },
-                    modifier = Modifier.size(56.dp).testTag("toggle_monitoring_button")
+                    modifier = Modifier.height(56.dp).testTag("toggle_monitoring_button")
                 ) {
                     Icon(
-                        if (desiredMonitoring) Icons.Default.PauseCircle else Icons.Default.PlayCircle,
-                        contentDescription = if (desiredMonitoring) "모니터링 중지" else "모니터링 시작",
-                        modifier = Modifier.size(40.dp)
+                        if (monitoringActive) Icons.Default.PauseCircle else Icons.Default.PlayCircle,
+                        contentDescription = null,
+                        modifier = Modifier.size(28.dp)
                     )
+                    Text(if (monitoringActive) " 모니터링 중지" else " 모니터링 시작")
                 }
             }
         }
@@ -289,9 +347,9 @@ private fun DashboardTab(
                         when {
                             !permissionsReady -> "권한 설정 필요"
                             !smsReady -> "문자 발송 설정 필요"
-                            !desiredMonitoring -> "모니터링 일시 중지"
                             runtimeState == MonitoringRuntimeState.STARTING -> "모니터링 시작 중"
                             runtimeState == MonitoringRuntimeState.ERROR -> "모니터링 중단됨"
+                            !monitoringActive -> "모니터링 중단됨"
                             alertState == 1 -> "안전 확인 대기 중"
                             alertState == 2 -> "긴급 문자 결과 확인 필요"
                             isMonitoring -> "정상 모니터링 중"
@@ -303,6 +361,17 @@ private fun DashboardTab(
                     if (!smsReady) {
                         Text(smsSetupState.userMessage(), textAlign = TextAlign.Center, fontSize = 16.sp)
                     }
+                    if (!monitoringActive && monitoringBlockReason != null) {
+                        Text(
+                            monitoringBlockReason,
+                            textAlign = TextAlign.Center,
+                            fontSize = 16.sp
+                        )
+                        TextButton(onClick = openSetup) { Text("설정 완료하기") }
+                    }
+                    if (userNotice.isNotBlank() && userNotice != monitoringBlockReason) {
+                        Text(userNotice, textAlign = TextAlign.Center, fontSize = 16.sp)
+                    }
                     if (runtimeState == MonitoringRuntimeState.ERROR && serviceError.isNotBlank()) {
                         Text(serviceError, textAlign = TextAlign.Center, fontSize = 16.sp)
                         Spacer(Modifier.height(8.dp))
@@ -312,16 +381,18 @@ private fun DashboardTab(
                             }
                         }
                     }
-                    Spacer(Modifier.height(12.dp))
-                    Text("다음 안전 확인까지", color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    Text(
-                        formatRemaining(remainingSeconds),
-                        fontSize = 42.sp,
-                        fontFamily = FontFamily.Monospace,
-                        fontWeight = FontWeight.Black,
-                        modifier = Modifier.testTag("remaining_time_text")
-                    )
-                    Text("마지막 활동: $lastActivity", maxLines = 2, overflow = TextOverflow.Ellipsis)
+                    if (monitoringActive) {
+                        Spacer(Modifier.height(12.dp))
+                        Text("다음 안전 확인까지", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text(
+                            formatRemaining(remainingSeconds),
+                            fontSize = 42.sp,
+                            fontFamily = FontFamily.Monospace,
+                            fontWeight = FontWeight.Black,
+                            modifier = Modifier.testTag("remaining_time_text")
+                        )
+                        Text("마지막 활동: $lastActivity", maxLines = 2, overflow = TextOverflow.Ellipsis)
+                    }
                 }
             }
         }
@@ -339,17 +410,20 @@ private fun DashboardTab(
         item {
             Button(
                 onClick = viewModel::startSosCountdown,
-                enabled = SosEligibility.canStart(
-                    smsReady = smsReady,
-                    hasEmergencyContacts = contacts.isNotEmpty(),
-                    smsPermissionGranted = hasSmsPermission(context)
-                ),
+                enabled = sosBlockReason == null,
                 colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error),
                 modifier = Modifier.fillMaxWidth().height(64.dp).testTag("sos_button")
             ) {
                 Text("SOS · 보호자에게 도움 요청", fontSize = 18.sp, fontWeight = FontWeight.Black)
             }
-            Text("누르면 5초 후 등록한 보호자에게 실제 문자를 보냅니다.", fontSize = 16.sp)
+            Text(
+                sosBlockReason ?: "누르면 5초 후 등록한 보호자에게 실제 문자를 보냅니다.",
+                fontSize = 16.sp,
+                color = if (sosBlockReason == null) Color.Unspecified else MaterialTheme.colorScheme.error
+            )
+            if (sosBlockReason != null) {
+                TextButton(onClick = openSetup) { Text("왜 사용할 수 없나요? · 설정 완료하기") }
+            }
         }
 
         item {
@@ -408,6 +482,18 @@ private fun DashboardTab(
                         Text("  안전 확인 시간", fontWeight = FontWeight.Bold)
                     }
                     Spacer(Modifier.height(10.dp))
+                    if (BuildConfig.DEBUG) {
+                        Text("개발 빌드 빠른 검증", fontSize = 14.sp)
+                        LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            items(listOf(1, 5)) { minutes ->
+                                FilterChip(
+                                    selected = debugMonitorMinutes == minutes,
+                                    onClick = { viewModel.updateDebugMonitorMinutes(minutes) },
+                                    label = { Text("${minutes}분") }
+                                )
+                            }
+                        }
+                    }
                     LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         items(listOf(6, 12, 24, 48, 72)) { hours ->
                             FilterChip(
@@ -417,6 +503,7 @@ private fun DashboardTab(
                             )
                         }
                     }
+                    TextButton(onClick = openSetup) { Text("초기 안전 설정 다시 하기") }
                 }
             }
         }

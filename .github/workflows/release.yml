@@ -52,8 +52,8 @@ jobs:
               node.get(android + "name"): node.get(android + "required")
               for node in root.findall("uses-feature")
           }
-          assert features.get("android.hardware.telephony") == "false"
-          assert features.get("android.hardware.telephony.messaging") == "false"
+          assert features.get("android.hardware.telephony") == "true"
+          assert "android.hardware.telephony.messaging" not in features
           PY
           for forbidden in \
             'com.google.android.gms.permission.AD_ID' \
