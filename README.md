@@ -1,6 +1,6 @@
 # LifeLink Android
 
-LifeLink는 일정 시간 동안 휴대전화 활동이 감지되지 않으면 등록한 보호자(최대 3명)에게 기기 SIM으로 긴급 문자를 보내는 Android 앱입니다.
+LifeLink는 일정 시간 동안 휴대전화 활동이 감지되지 않으면 등록한 보호자(온보딩 1명, 설정 후 최대 3명)에게 기기 SIM으로 긴급 문자를 보내는 Android 앱입니다.
 
 ## 현재 구현
 
@@ -26,7 +26,8 @@ LifeLink는 일정 시간 동안 휴대전화 활동이 감지되지 않으면 �
 - 광고는 도입하지 않으며 `AD_ID` 권한도 최종 앱 Manifest에서 제거합니다.
 - 로컬 무활동 감지, 긴급 SMS, 매일 안부 확인과 SOS 같은 기본 안전 기능은 무료로 유지합니다.
 - 보호자 연결, 서버 heartbeat, 연결 끊김 알림과 단계별 보호자 대응은 향후 `LifeLink Family` 구독 기능으로 제공합니다.
-- 현재 버전에는 결제 기능이 없습니다. 구독 출시 전 Google Play Billing과 서버 구매 검증을 구현하고 개인정보처리방침을 다시 갱신해야 합니다.
+- 앱에는 `Life Link Family`의 준비 중 기능과 예상 가격(월 3,900원·연 39,000원)을 투명하게 안내합니다. 현재 결제나 요금 청구는 발생하지 않습니다.
+- 구독 출시 전 Google Play Billing과 서버 구매 검증을 구현하고 개인정보처리방침을 다시 갱신해야 합니다.
 
 ## 중요한 한계
 
@@ -61,7 +62,7 @@ keyPassword=...
 
 Signed Android release 워크플로를 실행하려면 Actions secret에 ANDROID_UPLOAD_KEYSTORE_BASE64, ANDROID_UPLOAD_STORE_PASSWORD, ANDROID_UPLOAD_KEY_ALIAS, ANDROID_UPLOAD_KEY_PASSWORD를 등록하고 Repository Variable ANDROID_UPLOAD_CERT_SHA256에 업로드 인증서 지문을 설정합니다. 워크플로는 테스트와 lint를 실행하고 AAB 서명·인증서·SHA-256을 검증한 뒤 증빙 artifact로 보관합니다.
 
-릴리스 AAB는 `app/build/outputs/bundle/release/app-release.aab`에 생성됩니다. 앱 ID는 `com.bboysilver.lifelink`, 현재 버전은 `2.2.7 (28)`입니다. 기존 Play 앱에 올릴 때는 같은 업로드 인증서와 Play Console의 최신 versionCode보다 큰 번호를 사용해야 합니다.
+릴리스 AAB는 `app/build/outputs/bundle/release/app-release.aab`에 생성됩니다. 앱 ID는 `com.bboysilver.lifelink`, 현재 버전은 `2.2.8 (29)`입니다. 기존 Play 앱에 올릴 때는 같은 업로드 인증서와 Play Console의 최신 versionCode보다 큰 번호를 사용해야 합니다.
 
 ## 개인정보
 

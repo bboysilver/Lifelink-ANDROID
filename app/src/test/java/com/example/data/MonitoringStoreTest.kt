@@ -170,4 +170,44 @@ class MonitoringStoreTest {
     private object SetupStepValue {
         const val TEST_SMS = 4
     }
+    @Test
+    fun staleServiceDoesNotShowPreAlertOrEmergencyState() {
+        assertEquals(
+            0,
+            MonitoringAlertStatePolicy.resolve(
+                desiredEnabled = true,
+                runtimeState = MonitoringRuntimeState.ERROR,
+                deadlineMs = 10_000L,
+                remainingSeconds = 0L,
+                preAlerted = true,
+                emergencyDispatched = false
+            )
+        )
+    }
+
+    @Test
+    fun runningServiceShowsPreAlertAndConfirmedEmergency() {
+        assertEquals(
+            1,
+            MonitoringAlertStatePolicy.resolve(
+                desiredEnabled = true,
+                runtimeState = MonitoringRuntimeState.RUNNING,
+                deadlineMs = 10_000L,
+                remainingSeconds = DeadlineCalculator.PRE_ALERT_SECONDS,
+                preAlerted = false,
+                emergencyDispatched = false
+            )
+        )
+        assertEquals(
+            2,
+            MonitoringAlertStatePolicy.resolve(
+                desiredEnabled = true,
+                runtimeState = MonitoringRuntimeState.ERROR,
+                deadlineMs = 10_000L,
+                remainingSeconds = 0L,
+                preAlerted = true,
+                emergencyDispatched = true
+            )
+        )
+    }
 }

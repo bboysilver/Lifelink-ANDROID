@@ -18,9 +18,9 @@ class MainActivityUiTest {
     val composeRule = createAndroidComposeRule<MainActivity>()
 
     @Test
-    fun `setup explains device compatibility before safety features`() {
-        composeRule.onNodeWithText("기기 호환성 확인").assertIsDisplayed()
+    fun `setup combines compatibility and safety guidance on the first page`() {
+        composeRule.onNodeWithText("기능·기기 안내").assertIsDisplayed()
         composeRule.onNodeWithText("기기 상태 다시 확인").performClick()
-        composeRule.onNodeWithText("기기 호환성 확인").assertIsDisplayed()
+        composeRule.onNodeWithText("기능·기기 안내").assertIsDisplayed()
     }
 }

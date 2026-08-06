@@ -45,6 +45,20 @@ enum class SetupStep {
     }
 }
 
+internal enum class OnboardingPage {
+    GUIDE,
+    PROTECTOR,
+    MONITORING
+}
+
+internal fun SetupStep.onboardingPage(): OnboardingPage = when (this) {
+    SetupStep.DEVICE,
+    SetupStep.INTRO -> OnboardingPage.GUIDE
+    SetupStep.CONTACT,
+    SetupStep.PERMISSIONS,
+    SetupStep.TEST_SMS -> OnboardingPage.PROTECTOR
+    SetupStep.MONITORING -> OnboardingPage.MONITORING
+}
 internal object SafetyReadiness {
     fun monitoringBlockReason(
         smsSetupState: SmsSetupState,
@@ -109,18 +123,20 @@ internal fun SetupWizardDialog(
     onAdvance: (SetupStep) -> Unit,
     onComplete: () -> Unit
 ) {
-    var consented by remember(step) { mutableStateOf(step != SetupStep.INTRO) }
+    val page = step.onboardingPage()
+    var consented by remember { mutableStateOf(page != OnboardingPage.GUIDE) }
     var contactName by remember { mutableStateOf("") }
     var contactPhone by remember { mutableStateOf("") }
     val permissionsReady = smsGranted && phoneGranted && activityGranted && notificationGranted
     val smsReady = smsSetupState is SmsSetupState.Ready
+    val onboardingContact = contacts.firstOrNull()
 
     AlertDialog(
         onDismissRequest = {},
         title = {
             Column {
-                Text("안전 설정 ${step.ordinal + 1}/6", fontWeight = FontWeight.Bold)
-                Text(setupTitle(step))
+                Text("안전 설정 ${page.ordinal + 1}/3", fontWeight = FontWeight.Bold)
+                Text(setupTitle(page))
             }
         },
         text = {
@@ -128,8 +144,8 @@ internal fun SetupWizardDialog(
                 modifier = Modifier.verticalScroll(rememberScrollState()),
                 verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
-                when (step) {
-                    SetupStep.DEVICE -> {
+                when (page) {
+                    OnboardingPage.GUIDE -> {
                         Text("Life Link의 긴급 알림은 기기의 활성 SIM으로 실제 SMS를 보냅니다.")
                         Text(smsSetupState.userMessage(), fontWeight = FontWeight.Bold)
                         if (smsSetupState is SmsSetupState.Blocked &&
@@ -143,8 +159,7 @@ internal fun SetupWizardDialog(
                         OutlinedButton(onClick = onRefreshDevice, modifier = Modifier.fillMaxWidth()) {
                             Text("기기 상태 다시 확인")
                         }
-                    }
-                    SetupStep.INTRO -> {
+                        Spacer(Modifier.height(4.dp))
                         Text("설정 시간 동안 유효한 활동이 없으면 등록한 보호자에게 SMS를 보냅니다.")
                         Text("119 신고나 의료기기를 대신하지 않으며, 전원 꺼짐·강제 종료·통신 장애에서는 작동하지 않을 수 있습니다.")
                         Text("위치는 수집하지 않습니다. 연락처, 활동 확인 시각과 문자 결과는 이 기기에만 저장됩니다.")
@@ -153,36 +168,39 @@ internal fun SetupWizardDialog(
                             Text("개인정보 처리방침과 SMS 발송 안내에 동의합니다.")
                         }
                     }
-                    SetupStep.CONTACT -> {
-                        Text("문자를 받을 보호자를 최소 1명 등록해 주세요.")
-                        OutlinedTextField(
-                            value = contactName,
-                            onValueChange = { contactName = it.take(30) },
-                            label = { Text("보호자 이름") },
-                            modifier = Modifier.fillMaxWidth()
-                        )
-                        OutlinedTextField(
-                            value = contactPhone,
-                            onValueChange = { contactPhone = it.filter(Char::isDigit).take(15) },
-                            label = { Text("전화번호") },
-                            modifier = Modifier.fillMaxWidth()
-                        )
-                        Button(
-                            onClick = {
-                                onAddContact(contactName, contactPhone)
-                                if (contactName.isNotBlank() && contactPhone.length >= 8) {
-                                    contactName = ""
-                                    contactPhone = ""
-                                }
-                            },
-                            enabled = contacts.size < 3 && contactName.isNotBlank() &&
-                                contactPhone.length in 8..15,
-                            modifier = Modifier.fillMaxWidth()
-                        ) { Text("연락처 등록") }
-                        Text("전화번호는 숫자 8~15자리로 입력해 주세요.")
-                        contacts.forEach { Text("등록됨: ${it.name} · ${it.phoneNumber}") }
-                    }
-                    SetupStep.PERMISSIONS -> {
+                    OnboardingPage.PROTECTOR -> {
+                        Text("처음에는 문자를 받을 보호자 1명만 등록합니다.", fontWeight = FontWeight.Bold)
+                        Text("설정 완료 후 연락처 화면에서 보호자를 더 추가할 수 있습니다.")
+                        if (onboardingContact == null) {
+                            OutlinedTextField(
+                                value = contactName,
+                                onValueChange = { contactName = it.take(30) },
+                                label = { Text("보호자 이름") },
+                                modifier = Modifier.fillMaxWidth()
+                            )
+                            OutlinedTextField(
+                                value = contactPhone,
+                                onValueChange = { contactPhone = it.filter(Char::isDigit).take(15) },
+                                label = { Text("전화번호") },
+                                modifier = Modifier.fillMaxWidth()
+                            )
+                            Button(
+                                onClick = {
+                                    onAddContact(contactName, contactPhone)
+                                    if (contactName.isNotBlank() && contactPhone.length >= 8) {
+                                        contactName = ""
+                                        contactPhone = ""
+                                    }
+                                },
+                                enabled = contactName.isNotBlank() && contactPhone.length in 8..15,
+                                modifier = Modifier.fillMaxWidth()
+                            ) { Text("보호자 1명 등록") }
+                            Text("전화번호는 숫자 8~15자리로 입력해 주세요.")
+                        } else {
+                            Text("등록 완료: ${onboardingContact.name} · ${onboardingContact.phoneNumber}")
+                        }
+
+                        Spacer(Modifier.height(4.dp))
                         Text("각 권한은 표시된 안전 기능에만 사용합니다.")
                         SetupPermissionRow("1. 사전 경고 알림", notificationGranted, onRequestNotification)
                         SetupPermissionRow("2. 활동 인식", activityGranted, onRequestActivity)
@@ -202,14 +220,15 @@ internal fun SetupWizardDialog(
                                 ) { Text("${line.label} 사용") }
                             }
                         }
-                    }
-                    SetupStep.TEST_SMS -> {
+
+                        Spacer(Modifier.height(4.dp))
                         Text("모니터링을 켜기 전에 보호자에게 실제 시험 문자 1건을 보냅니다.")
                         Text("시험 문자는 자동 재시도하지 않으며 60초 동안 다시 보낼 수 없습니다.")
-                        contacts.forEach { contact ->
+                        onboardingContact?.let { contact ->
                             OutlinedButton(
                                 onClick = { onSendTestSms(contact) },
-                                enabled = testSmsVerification.state != TestSmsVerificationState.PENDING,
+                                enabled = permissionsReady && smsReady &&
+                                    testSmsVerification.state != TestSmsVerificationState.PENDING,
                                 modifier = Modifier.fillMaxWidth()
                             ) { Text("${contact.name}에게 시험 문자 보내기") }
                         }
@@ -218,7 +237,7 @@ internal fun SetupWizardDialog(
                         }
                         Text(message, fontWeight = FontWeight.Bold)
                     }
-                    SetupStep.MONITORING -> {
+                    OnboardingPage.MONITORING -> {
                         Text("활동이 없을 때 보호자에게 알릴 시간을 선택해 주세요.")
                         Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                             listOf(6, 12, 24).forEach { hours ->
@@ -237,27 +256,38 @@ internal fun SetupWizardDialog(
             }
         },
         confirmButton = {
-            val next = SetupStep.entries.getOrNull(step.ordinal + 1)
             Button(
-                onClick = { if (next == null) onComplete() else onAdvance(next) },
-                enabled = when (step) {
-                    SetupStep.DEVICE -> smsSetupState !is SmsSetupState.Blocked ||
-                        smsSetupState.issue in setOf(
-                            SmsSetupIssue.PHONE_PERMISSION_REQUIRED,
-                            SmsSetupIssue.SIM_SELECTION_REQUIRED,
-                            SmsSetupIssue.SIM_CHANGED
+                onClick = {
+                    when (page) {
+                        OnboardingPage.GUIDE -> onAdvance(SetupStep.CONTACT)
+                        OnboardingPage.PROTECTOR -> onAdvance(SetupStep.MONITORING)
+                        OnboardingPage.MONITORING -> onComplete()
+                    }
+                },
+                enabled = when (page) {
+                    OnboardingPage.GUIDE -> consented && (
+                        smsSetupState !is SmsSetupState.Blocked ||
+                            smsSetupState.issue in setOf(
+                                SmsSetupIssue.PHONE_PERMISSION_REQUIRED,
+                                SmsSetupIssue.SIM_SELECTION_REQUIRED,
+                                SmsSetupIssue.SIM_CHANGED
+                            )
                         )
-                    SetupStep.INTRO -> consented
-                    SetupStep.CONTACT -> contacts.isNotEmpty()
-                    SetupStep.PERMISSIONS -> permissionsReady && smsReady
-                    SetupStep.TEST_SMS -> testSmsVerification.state == TestSmsVerificationState.SUCCESS
-                    SetupStep.MONITORING -> true
+                    OnboardingPage.PROTECTOR -> onboardingContact != null && permissionsReady &&
+                        smsReady && testSmsVerification.state == TestSmsVerificationState.SUCCESS
+                    OnboardingPage.MONITORING -> true
                 }
-            ) { Text(if (step == SetupStep.MONITORING) "안전 모니터링 시작" else "다음") }
+            ) { Text(if (page == OnboardingPage.MONITORING) "안전 모니터링 시작" else "다음") }
         },
         dismissButton = {
-            if (step.ordinal > 0) {
-                TextButton(onClick = { onAdvance(SetupStep.entries[step.ordinal - 1]) }) {
+            if (page != OnboardingPage.GUIDE) {
+                TextButton(
+                    onClick = {
+                        onAdvance(
+                            if (page == OnboardingPage.MONITORING) SetupStep.CONTACT else SetupStep.DEVICE
+                        )
+                    }
+                ) {
                     Text("이전")
                 }
             }
@@ -277,11 +307,8 @@ private fun SetupPermissionRow(label: String, granted: Boolean, request: () -> U
     }
 }
 
-private fun setupTitle(step: SetupStep): String = when (step) {
-    SetupStep.DEVICE -> "기기 호환성 확인"
-    SetupStep.INTRO -> "기능과 한계 동의"
-    SetupStep.CONTACT -> "비상연락처 등록"
-    SetupStep.PERMISSIONS -> "필수 권한과 SIM 설정"
-    SetupStep.TEST_SMS -> "보호자 시험 문자"
-    SetupStep.MONITORING -> "안심 시간과 시작"
+private fun setupTitle(page: OnboardingPage): String = when (page) {
+    OnboardingPage.GUIDE -> "기능·기기 안내"
+    OnboardingPage.PROTECTOR -> "보호자·권한·시험 문자"
+    OnboardingPage.MONITORING -> "안심 시간과 시작"
 }

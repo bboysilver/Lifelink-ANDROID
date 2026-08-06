@@ -1,6 +1,6 @@
 # LifeLink 출시 로드맵
 
-기준 버전: Android 2.2.7 (28)
+기준 버전: Android 2.2.8 (29)
 
 ## 현재 목표: Closed testing
 
@@ -10,7 +10,7 @@
 - GitHub Actions의 `Signed Android release`에서 생성한 서명 AAB만 사용한다.
 - 최종 AAB Manifest에 `com.google.android.gms.permission.AD_ID`가 없어야 한다.
 - Play Console의 광고 ID 및 광고 선언은 모두 `No`로 유지한다.
-- 기존 Closed testing 및 Internal testing의 오래된 아티팩트는 2.2.7 (28)로 교체하거나 비활성화한다.
+- 기존 Closed testing 및 Internal testing의 오래된 아티팩트는 2.2.8 (29)로 교체하거나 비활성화한다.
 - SMS 권한 용도는 고령자 안전을 위한 물리적 안전·긴급 알림으로 설명한다.
 - Foreground service는 실제 Manifest와 동일하게 `health`만 선언한다.
 - 개인정보처리방침 URL은 `https://bboysilver.github.io/Lifelink-ANDROID/privacy-policy.html`을 사용한다.
@@ -57,6 +57,8 @@
 예상 기간: Family MVP 실증 후 4~6주
 
 - 무료와 `LifeLink Family` 한 가지 유료 등급만 운영한다.
+- 초기 가격 가설은 월 3,900원, 연 39,000원, 14일 무료 체험으로 검증한다.
+- Family에는 서버 heartbeat, 보호자 상태 화면, 연결·배터리·권한·SIM 이상 알림, 원격 안부 요청, 보호자 최대 5명, 단계별 알림, 90일 기록을 포함한다.
 - Google Play Billing을 사용하고 구매 토큰은 백엔드에서 검증한다.
 - 갱신, 해지, 유예, 결제 보류, 환불과 구매 승인을 서버에서 처리한다.
 - 구독이 끝나도 무료 로컬 감지와 긴급 SMS는 계속 동작하게 한다.

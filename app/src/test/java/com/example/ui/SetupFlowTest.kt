@@ -56,4 +56,13 @@ class SetupFlowTest {
     private fun readyState(): SmsSetupState = SmsSetupState.Ready(
         SmsLine(subscriptionId = 1, slotIndex = 0, label = "SIM 1")
     )
+    @Test
+    fun legacySetupStepsCollapseIntoThreeOnboardingPages() {
+        assertEquals(OnboardingPage.GUIDE, SetupStep.DEVICE.onboardingPage())
+        assertEquals(OnboardingPage.GUIDE, SetupStep.INTRO.onboardingPage())
+        assertEquals(OnboardingPage.PROTECTOR, SetupStep.CONTACT.onboardingPage())
+        assertEquals(OnboardingPage.PROTECTOR, SetupStep.PERMISSIONS.onboardingPage())
+        assertEquals(OnboardingPage.PROTECTOR, SetupStep.TEST_SMS.onboardingPage())
+        assertEquals(OnboardingPage.MONITORING, SetupStep.MONITORING.onboardingPage())
+    }
 }

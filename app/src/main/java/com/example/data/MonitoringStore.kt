@@ -478,13 +478,14 @@ class MonitoringStore(context: Context) {
             else -> preferences.getString(KEY_SERVICE_ERROR, "모니터링이 중단되었습니다.")
                 ?: "모니터링이 중단되었습니다."
         }
-        val alertState = when {
-            !desiredEnabled -> 0
-            currentDeadline <= 0L -> 0
-            wasEmergencyDispatched(currentDeadline) || remaining == 0L -> 2
-            wasPreAlerted(currentDeadline) || remaining <= DeadlineCalculator.PRE_ALERT_SECONDS -> 1
-            else -> 0
-        }
+        val alertState = MonitoringAlertStatePolicy.resolve(
+            desiredEnabled = desiredEnabled,
+            runtimeState = runtimeState,
+            deadlineMs = currentDeadline,
+            remainingSeconds = remaining,
+            preAlerted = wasPreAlerted(currentDeadline),
+            emergencyDispatched = wasEmergencyDispatched(currentDeadline)
+        )
         return MonitoringSnapshot(
             desiredEnabled = desiredEnabled,
             runtimeState = runtimeState,
@@ -542,5 +543,23 @@ class MonitoringStore(context: Context) {
         const val HEARTBEAT_TIMEOUT_MS = 150_000L
         const val START_TIMEOUT_MS = 30_000L
         private val SOS_LOCK = Any()
+    }
+}
+
+internal object MonitoringAlertStatePolicy {
+    fun resolve(
+        desiredEnabled: Boolean,
+        runtimeState: MonitoringRuntimeState,
+        deadlineMs: Long,
+        remainingSeconds: Long,
+        preAlerted: Boolean,
+        emergencyDispatched: Boolean
+    ): Int = when {
+        !desiredEnabled || deadlineMs <= 0L -> 0
+        emergencyDispatched -> 2
+        runtimeState != MonitoringRuntimeState.RUNNING -> 0
+        remainingSeconds == 0L -> 2
+        preAlerted || remainingSeconds <= DeadlineCalculator.PRE_ALERT_SECONDS -> 1
+        else -> 0
     }
 }

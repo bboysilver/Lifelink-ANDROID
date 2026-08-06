@@ -92,6 +92,7 @@ fun LifeLinkApp(viewModel: LifeLinkViewModel) {
     val contacts by viewModel.contacts.collectAsState()
     val monitorHours by viewModel.monitorHours.collectAsState()
     val alertState by viewModel.alertState.collectAsState()
+    val isMonitoring by viewModel.isMonitoring.collectAsState()
     val smsSetupState by viewModel.smsSetupState.collectAsState()
     val dailyCheckInDue by viewModel.dailyCheckInDue.collectAsState()
     val sosCountdownSeconds by viewModel.sosCountdownSeconds.collectAsState()
@@ -174,7 +175,7 @@ fun LifeLinkApp(viewModel: LifeLinkViewModel) {
             onSafe = viewModel::reportDailySafe,
             onHelp = viewModel::requestDailyHelp
         )
-        alertState == 1 -> PreAlertDialog(
+        alertState == 1 && isMonitoring -> PreAlertDialog(
             onDismiss = { viewModel.reportSurvival("사전 알림에서 무사 확인") }
         )
     }
@@ -417,7 +418,8 @@ private fun DashboardTab(
                 Text("SOS · 보호자에게 도움 요청", fontSize = 18.sp, fontWeight = FontWeight.Black)
             }
             Text(
-                sosBlockReason ?: "누르면 5초 후 등록한 보호자에게 실제 문자를 보냅니다.",
+                sosBlockReason
+                    ?: "수동 SOS는 타이머와 별도입니다. 직접 누르면 5초 뒤 보호자에게 실제 문자를 보냅니다.",
                 fontSize = 16.sp,
                 color = if (sosBlockReason == null) Color.Unspecified else MaterialTheme.colorScheme.error
             )
@@ -509,6 +511,9 @@ private fun DashboardTab(
         }
 
         item {
+            FamilyPlanCard()
+        }
+        item {
             Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)) {
                 Row(Modifier.padding(16.dp), verticalAlignment = Alignment.Top) {
                     Icon(Icons.Default.Warning, null)
@@ -522,6 +527,29 @@ private fun DashboardTab(
     }
 }
 
+@Composable
+private fun FamilyPlanCard() {
+    Card(
+        colors = CardDefaults.cardColors(containerColor = Color(0xFFEAF4F1)),
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text("Life Link Family · 준비 중", fontSize = 20.sp, fontWeight = FontWeight.Bold)
+            Text(
+                "${LifeLinkFamilyPlan.monthlyPriceLabel} · ${LifeLinkFamilyPlan.annualPriceLabel} " +
+                    "· ${LifeLinkFamilyPlan.TRIAL_DAYS}일 무료 체험 예정",
+                fontWeight = FontWeight.Bold
+            )
+            Text("무료 안전 기능은 그대로 유지하고, 가족이 원격으로 상태를 확인하는 기능만 구독에 포함합니다.")
+            LifeLinkFamilyPlan.benefits.forEach { benefit -> Text("• $benefit") }
+            Text(
+                "아직 결제 기능은 연결되지 않았으며 현재 화면에서 요금이 청구되지 않습니다.",
+                fontSize = 14.sp,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+    }
+}
 @Composable
 private fun PermissionSetupCard(
     smsGranted: Boolean,
