@@ -10,6 +10,18 @@ import org.junit.Test
 
 class SetupFlowTest {
     @Test
+    fun guardianPhoneFormatsAsDigitsAreEntered() {
+        assertEquals("010", formatGuardianPhone("010"))
+        assertEquals("010-1234", formatGuardianPhone("0101234"))
+        assertEquals("010-1234-5678", formatGuardianPhone("01012345678"))
+    }
+
+    @Test
+    fun guardianPhoneIgnoresNonDigitsAndStopsAtElevenDigits() {
+        assertEquals("010-1234-5678", formatGuardianPhone("010a1234-567899"))
+    }
+
+    @Test
     fun unsupportedDeviceExplainsWhySosCannotRun() {
         val reason = SafetyReadiness.sosBlockReason(
             smsSetupState = SmsSetupState.Blocked(SmsSetupIssue.UNSUPPORTED_DEVICE),

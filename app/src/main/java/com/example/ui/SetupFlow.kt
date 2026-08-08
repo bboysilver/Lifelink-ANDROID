@@ -1,5 +1,6 @@
 package com.example.ui
 
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -14,6 +15,8 @@ import androidx.compose.material3.Checkbox
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -23,7 +26,10 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import com.example.data.Contact
 import com.example.data.TestSmsVerification
@@ -50,6 +56,20 @@ internal enum class OnboardingPage {
     PROTECTOR,
     MONITORING
 }
+
+private const val GUARDIAN_PHONE_DIGITS = 11
+
+internal fun formatGuardianPhone(input: String): String {
+    val digits = input.filter(Char::isDigit).take(GUARDIAN_PHONE_DIGITS)
+    return when {
+        digits.length <= 3 -> digits
+        digits.length <= 7 -> "${digits.take(3)}-${digits.drop(3)}"
+        else -> "${digits.take(3)}-${digits.substring(3, 7)}-${digits.drop(7)}"
+    }
+}
+
+private fun isCompleteGuardianPhone(input: String): Boolean =
+    input.count(Char::isDigit) == GUARDIAN_PHONE_DIGITS
 
 internal fun SetupStep.onboardingPage(): OnboardingPage = when (this) {
     SetupStep.DEVICE,
@@ -180,24 +200,35 @@ internal fun SetupWizardDialog(
                             )
                             OutlinedTextField(
                                 value = contactPhone,
-                                onValueChange = { contactPhone = it.filter(Char::isDigit).take(15) },
+                                onValueChange = { contactPhone = formatGuardianPhone(it) },
                                 label = { Text("전화번호") },
+                                placeholder = {
+                                    Text(
+                                        "000-0000-0000",
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                },
+                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                                singleLine = true,
                                 modifier = Modifier.fillMaxWidth()
                             )
                             Button(
                                 onClick = {
                                     onAddContact(contactName, contactPhone)
-                                    if (contactName.isNotBlank() && contactPhone.length >= 8) {
+                                    if (contactName.isNotBlank() && isCompleteGuardianPhone(contactPhone)) {
                                         contactName = ""
                                         contactPhone = ""
                                     }
                                 },
-                                enabled = contactName.isNotBlank() && contactPhone.length in 8..15,
+                                enabled = contactName.isNotBlank() && isCompleteGuardianPhone(contactPhone),
                                 modifier = Modifier.fillMaxWidth()
                             ) { Text("보호자 1명 등록") }
-                            Text("전화번호는 숫자 8~15자리로 입력해 주세요.")
+                            Text("전화번호는 숫자 11자리로 입력해 주세요.")
                         } else {
-                            Text("등록 완료: ${onboardingContact.name} · ${onboardingContact.phoneNumber}")
+                            Text(
+                                "등록 완료: ${onboardingContact.name} · " +
+                                    formatGuardianPhone(onboardingContact.phoneNumber)
+                            )
                         }
 
                         Spacer(Modifier.height(4.dp))
@@ -302,8 +333,18 @@ private fun SetupPermissionRow(label: String, granted: Boolean, request: () -> U
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Text("$label: ${if (granted) "허용됨" else "필요"}")
-        if (!granted) TextButton(onClick = request) { Text("허용") }
+        Text(label, modifier = Modifier.weight(1f))
+        Text(if (granted) "허용됨" else "허용 필요")
+        Switch(
+            checked = granted,
+            onCheckedChange = { checked ->
+                if (checked && !granted) request()
+            },
+            enabled = !granted,
+            modifier = Modifier.semantics {
+                contentDescription = "$label 권한 ${if (granted) "허용됨" else "허용 필요"}"
+            }
+        )
     }
 }
 
