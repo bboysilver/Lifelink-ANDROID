@@ -28,8 +28,12 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.OffsetMapping
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.input.TransformedText
+import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import com.example.data.Contact
 import com.example.data.TestSmsVerification
@@ -59,12 +63,29 @@ internal enum class OnboardingPage {
 
 private const val GUARDIAN_PHONE_DIGITS = 11
 
+internal fun guardianPhoneDigits(input: String): String =
+    input.filter(Char::isDigit).take(GUARDIAN_PHONE_DIGITS)
+
 internal fun formatGuardianPhone(input: String): String {
-    val digits = input.filter(Char::isDigit).take(GUARDIAN_PHONE_DIGITS)
+    val digits = guardianPhoneDigits(input)
     return when {
         digits.length <= 3 -> digits
         digits.length <= 7 -> "${digits.take(3)}-${digits.drop(3)}"
         else -> "${digits.take(3)}-${digits.substring(3, 7)}-${digits.drop(7)}"
+    }
+}
+
+internal object GuardianPhoneVisualTransformation : VisualTransformation {
+    override fun filter(text: AnnotatedString): TransformedText {
+        val formatted = formatGuardianPhone(text.text)
+        val offsetMapping = object : OffsetMapping {
+            override fun originalToTransformed(offset: Int): Int =
+                formatGuardianPhone(text.text.take(offset)).length
+
+            override fun transformedToOriginal(offset: Int): Int =
+                formatted.take(offset).count(Char::isDigit)
+        }
+        return TransformedText(AnnotatedString(formatted), offsetMapping)
     }
 }
 
@@ -194,13 +215,14 @@ internal fun SetupWizardDialog(
                         if (onboardingContact == null) {
                             OutlinedTextField(
                                 value = contactName,
-                                onValueChange = { contactName = it.take(30) },
+                                onValueChange = { if (it.length <= 30) contactName = it },
                                 label = { Text("보호자 이름") },
+                                singleLine = true,
                                 modifier = Modifier.fillMaxWidth()
                             )
                             OutlinedTextField(
                                 value = contactPhone,
-                                onValueChange = { contactPhone = formatGuardianPhone(it) },
+                                onValueChange = { contactPhone = guardianPhoneDigits(it) },
                                 label = { Text("전화번호") },
                                 placeholder = {
                                     Text(
@@ -209,6 +231,7 @@ internal fun SetupWizardDialog(
                                     )
                                 },
                                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                                visualTransformation = GuardianPhoneVisualTransformation,
                                 singleLine = true,
                                 modifier = Modifier.fillMaxWidth()
                             )

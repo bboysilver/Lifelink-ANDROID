@@ -7,6 +7,7 @@ import com.example.monitoring.SmsSetupState
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Test
+import androidx.compose.ui.text.AnnotatedString
 
 class SetupFlowTest {
     @Test
@@ -19,6 +20,16 @@ class SetupFlowTest {
     @Test
     fun guardianPhoneIgnoresNonDigitsAndStopsAtElevenDigits() {
         assertEquals("010-1234-5678", formatGuardianPhone("010a1234-567899"))
+    }
+
+    @Test
+    fun guardianPhoneKeepsRawDigitsSeparateFromDisplayedHyphens() {
+        assertEquals("01012345678", guardianPhoneDigits("010-1234-5678"))
+        val transformed = GuardianPhoneVisualTransformation.filter(AnnotatedString("01012345678"))
+
+        assertEquals("010-1234-5678", transformed.text.text)
+        assertEquals(5, transformed.offsetMapping.originalToTransformed(4))
+        assertEquals(4, transformed.offsetMapping.transformedToOriginal(5))
     }
 
     @Test
