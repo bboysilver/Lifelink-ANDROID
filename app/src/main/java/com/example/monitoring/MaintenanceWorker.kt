@@ -23,6 +23,9 @@ class MaintenanceWorker(
         SafetyIncidentRepository(database)
             .deleteCompletedBefore(nowMs - SmsDispatchStore.RETENTION_MS)
         SafetySmsRetryWorker.enqueueRecovery(applicationContext)
+        if (com.example.data.MonitoringStore(applicationContext).desiredEnabled) {
+            MonitoringWatchdogWorker.ensureScheduled(applicationContext)
+        }
         Result.success()
     } catch (_: RuntimeException) {
         Result.retry()

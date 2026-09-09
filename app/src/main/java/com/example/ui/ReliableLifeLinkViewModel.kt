@@ -208,7 +208,7 @@ class LifeLinkViewModel(application: Application) : AndroidViewModel(application
     }
 
     fun stopMonitoring() {
-        MonitoringService.stop(context)
+        MonitoringService.stop(context, notifyUser = true)
         viewModelScope.launch {
             repository.insertLog("SETTINGS_CHANGED", "안심 모니터링을 일시 중지했습니다.")
         }
@@ -509,9 +509,7 @@ class LifeLinkViewModel(application: Application) : AndroidViewModel(application
         activityPermissionGranted = Build.VERSION.SDK_INT < Build.VERSION_CODES.Q ||
             ContextCompat.checkSelfPermission(context, Manifest.permission.ACTIVITY_RECOGNITION) ==
             PackageManager.PERMISSION_GRANTED,
-        notificationPermissionGranted = Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU ||
-            ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) ==
-            PackageManager.PERMISSION_GRANTED,
+        notificationPermissionGranted = SafetyNotificationCapability.canPost(context),
         hasEmergencyContacts = contacts.value.isNotEmpty(),
         testSmsState = monitoringStore.testSmsVerification.state
     )

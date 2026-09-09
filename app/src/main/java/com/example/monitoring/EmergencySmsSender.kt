@@ -3,6 +3,7 @@ package com.example.monitoring
 import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
+import android.net.Uri
 import com.example.data.Contact
 
 enum class SmsQueueResult { QUEUED, WAITING, ALREADY_RESOLVED, FAILED_FINAL }
@@ -107,6 +108,14 @@ class EmergencySmsSender(
         val phoneDigits = contact.phoneNumber.filter(Char::isDigit)
         val intent = Intent(context, SmsStatusReceiver::class.java).apply {
             this.action = action
+            data = Uri.Builder()
+                .scheme("lifelink")
+                .authority("sms-status")
+                .appendPath(action)
+                .appendPath(eventId)
+                .appendPath(attempt.toString())
+                .appendPath(partIndex.toString())
+                .build()
             putExtra(SmsStatusReceiver.EXTRA_EVENT_ID, eventId)
             putExtra(SmsStatusReceiver.EXTRA_CONTACT_NAME, contact.name)
             putExtra(SmsStatusReceiver.EXTRA_PHONE_SUFFIX, phoneDigits.takeLast(4))

@@ -8,6 +8,8 @@ LifeLink는 일정 시간 동안 휴대전화 활동이 감지되지 않으면 �
 - 마지막 활동 시각과 마감 시각을 기기에 저장해 앱 프로세스가 다시 생성되어도 남은 시간을 복원합니다.
 - 재부팅 및 앱 업데이트 후 사용자가 켜 둔 모니터링을 다시 시작합니다.
 - 서비스 heartbeat가 끊기면 `정상 모니터링 중` 대신 오류와 복구 버튼을 표시합니다.
+- 독립 WorkManager 감시자가 서비스 heartbeat 중단을 주기적으로 확인하고, 시스템이 알림을 허용하는 경우 앱 재실행 안내를 표시합니다.
+- 사용자가 모니터링 중지를 선택하면 확인 절차와 즉시 중단 알림을 표시하고, 앱으로 돌아올 때 권한·알림 채널·서비스 상태를 다시 확인합니다.
 - 마감 30분 전 고우선순위 알림에서 `무사합니다`를 누를 수 있습니다.
 - 연락처별 문자 상태를 `QUEUED -> SENT -> DELIVERED` 또는 실패 상태로 저장합니다.
 - 실제 발송 실패나 콜백 시간 초과 시 5분 간격으로 최대 3회 재시도합니다.
@@ -31,7 +33,7 @@ LifeLink는 일정 시간 동안 휴대전화 활동이 감지되지 않으면 �
 
 ## 중요한 한계
 
-이 앱은 119, 의료기기, 전문 보안 서비스를 대신하지 않습니다. 휴대전화 전원이 꺼진 경우, 사용자가 앱을 강제 종료한 경우, 제조사 절전 정책이 서비스를 중지한 경우, SIM/통신망이 사용할 수 없는 경우에는 감지 또는 문자 발송이 동작하지 않을 수 있습니다. SMS 전달 확인은 이동통신사와 단말 지원 여부에 따라 제공되지 않을 수 있습니다.
+이 앱은 의료기기가 아니며 질병을 진단·치료·완치·예방하지 않습니다. 119 또는 전문 보안 서비스를 대신하지 않습니다. 휴대전화 전원이 꺼진 경우, Android 설정에서 앱을 강제 종료한 경우, 제조사 절전 정책이 작업까지 제한한 경우, 알림이 차단된 경우, SIM/통신망이 사용할 수 없는 경우에는 감지·중단 알림 또는 문자 발송이 동작하지 않을 수 있습니다. 독립 중단 확인은 Android 시스템 일정에 따라 15분보다 늦어질 수 있으며, SMS 전달 확인은 이동통신사와 단말 지원 여부에 따라 제공되지 않을 수 있습니다.
 
 공개 출시 전에는 Google Play의 SMS 권한 정책 승인이 필요하며, 지원 대상 실기기에서 장시간·재부팅·절전·통신 실패 테스트를 완료해야 합니다.
 
@@ -62,7 +64,7 @@ keyPassword=...
 
 Signed Android release 워크플로를 실행하려면 Actions secret에 ANDROID_UPLOAD_KEYSTORE_BASE64, ANDROID_UPLOAD_STORE_PASSWORD, ANDROID_UPLOAD_KEY_ALIAS, ANDROID_UPLOAD_KEY_PASSWORD를 등록하고 Repository Variable ANDROID_UPLOAD_CERT_SHA256에 업로드 인증서 지문을 설정합니다. 워크플로는 테스트와 lint를 실행하고 AAB 서명·인증서·SHA-256을 검증한 뒤 증빙 artifact로 보관합니다.
 
-릴리스 AAB는 `app/build/outputs/bundle/release/app-release.aab`에 생성됩니다. 앱 ID는 `com.bboysilver.lifelink`, 현재 버전은 `2.2.8 (29)`입니다. 기존 Play 앱에 올릴 때는 같은 업로드 인증서와 Play Console의 최신 versionCode보다 큰 번호를 사용해야 합니다.
+릴리스 AAB는 `app/build/outputs/bundle/release/app-release.aab`에 생성됩니다. 앱 ID는 `com.bboysilver.lifelink`, 현재 버전은 `2.2.11 (32)`입니다. 기존 Play 앱에 올릴 때는 같은 업로드 인증서와 Play Console의 최신 versionCode보다 큰 번호를 사용해야 합니다.
 
 ## 개인정보
 

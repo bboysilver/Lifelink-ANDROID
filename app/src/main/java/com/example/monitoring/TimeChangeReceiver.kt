@@ -9,6 +9,9 @@ class TimeChangeReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
         if (intent.action !in SUPPORTED_ACTIONS) return
         val store = MonitoringStore(context.applicationContext)
+        if (intent.action == Intent.ACTION_TIME_CHANGED) {
+            store.rebaseAfterWallClockChange()
+        }
         if (!store.isSetupCompleted || !store.dailyCheckInEnabled) return
 
         val nowMs = System.currentTimeMillis()

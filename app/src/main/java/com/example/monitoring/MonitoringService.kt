@@ -120,6 +120,8 @@ class MonitoringService : Service() {
             val nowMs = System.currentTimeMillis()
             store.markServiceRunning(nowMs)
             lastHeartbeatWriteMs = nowMs
+            MonitoringWatchdogWorker.ensureScheduled(this)
+            MonitoringStatusNotifier.cancel(this)
         }
     }
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -131,7 +133,16 @@ class MonitoringService : Service() {
             ACTION_RESET -> store.resetDeadline(
                 reason = intent.getStringExtra(EXTRA_REASON) ?: "활동 확인"
             )
-            ACTION_START -> store.initializeDeadlineIfMissing()
+            ACTION_START -> {
+                store.initializeDeadlineIfMissing()
+                if (store.desiredEnabled) {
+                    val nowMs = System.currentTimeMillis()
+                    store.markServiceRunning(nowMs)
+                    lastHeartbeatWriteMs = nowMs
+                    MonitoringWatchdogWorker.ensureScheduled(this)
+                    MonitoringStatusNotifier.cancel(this)
+                }
+            }
         }
 
         val dailyNeedsWork = store.dailyCheckInStatus().needsResponse
@@ -154,7 +165,12 @@ class MonitoringService : Service() {
         monitorJob?.cancel()
         serviceScope.cancel()
         if (::store.isInitialized && store.desiredEnabled && !startupFailed) {
-            store.markServiceError("모니터링 서비스가 종료되었습니다.")
+            val message = "모니터링 서비스가 예기치 않게 종료되었습니다."
+            store.markServiceError(message)
+            val snapshot = store.snapshot()
+            if (store.claimWatchdogAlert(MonitoringWatchdogPolicy.alertToken(snapshot))) {
+                MonitoringStatusNotifier.showUnexpectedStop(this, message)
+            }
         }
         super.onDestroy()
     }
@@ -194,6 +210,10 @@ class MonitoringService : Service() {
                 if (store.desiredEnabled) {
                     val nowMs = System.currentTimeMillis()
                     if (MonitoringUpdatePolicy.shouldWriteHeartbeat(lastHeartbeatWriteMs, nowMs)) {
+                        runtimeCapabilityIssue()?.let { message ->
+                            failRuntime(message)
+                            return@launch
+                        }
                         store.markHeartbeat(nowMs)
                         lastHeartbeatWriteMs = nowMs
                     }
@@ -388,6 +408,40 @@ class MonitoringService : Service() {
         lastBlockingAlertMs = nowMs
         repository.insertLog("SMS_FAILED", logMessage)
         showAlertNotification(title, body)
+    }
+
+    private fun runtimeCapabilityIssue(): String? {
+        if (!SafetyNotificationCapability.canPost(this)) {
+            return "안전 알림이 꺼져 있어 모니터링을 계속할 수 없습니다."
+        }
+        if (
+            Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q &&
+            ContextCompat.checkSelfPermission(this, Manifest.permission.ACTIVITY_RECOGNITION) !=
+            PackageManager.PERMISSION_GRANTED
+        ) {
+            return "활동 인식 권한이 해제되어 모니터링을 계속할 수 없습니다."
+        }
+        if (
+            ContextCompat.checkSelfPermission(this, Manifest.permission.READ_PHONE_STATE) !=
+            PackageManager.PERMISSION_GRANTED
+        ) {
+            return "SIM 상태 확인 권한이 해제되어 모니터링을 계속할 수 없습니다."
+        }
+        if (
+            ContextCompat.checkSelfPermission(this, Manifest.permission.SEND_SMS) !=
+            PackageManager.PERMISSION_GRANTED
+        ) {
+            return "문자 권한이 해제되어 모니터링을 계속할 수 없습니다."
+        }
+        return null
+    }
+
+    private fun failRuntime(message: String) {
+        startupFailed = true
+        store.markServiceError(message)
+        serviceScope.launch { repository.insertLog("SYSTEM_ERROR", "안심 모니터링을 중단했습니다.", message) }
+        showAlertNotification("모니터링 중단", message)
+        stopSelf()
     }
 
     private fun confirmSafe(reason: String) {
@@ -591,6 +645,7 @@ class MonitoringService : Service() {
         fun start(context: Context) {
             val store = MonitoringStore(context)
             if (!store.desiredEnabled) return
+            MonitoringWatchdogWorker.ensureScheduled(context)
             val smsSetup = SmsDeviceManager(context, store).inspect()
             if (smsSetup !is SmsSetupState.Ready) {
                 store.markServiceError(smsSetup.userMessage())
@@ -608,9 +663,11 @@ class MonitoringService : Service() {
             }
         }
 
-        fun stop(context: Context) {
+        fun stop(context: Context, notifyUser: Boolean = false) {
             MonitoringStore(context).stop()
+            MonitoringWatchdogWorker.cancel(context)
             context.stopService(Intent(context, MonitoringService::class.java))
+            if (notifyUser) MonitoringStatusNotifier.showUserStopped(context)
         }
 
         fun reset(context: Context, reason: String) {

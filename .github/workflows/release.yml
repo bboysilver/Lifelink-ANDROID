@@ -36,7 +36,7 @@ jobs:
       - name: Verify final merged manifest safety permissions
         run: |
           set -euo pipefail
-          manifest="app/build/intermediates/merged_manifest/release/processReleaseMainManifest/AndroidManifest.xml"
+          manifest="app/build/intermediates/merged_manifests/release/processReleaseManifest/AndroidManifest.xml"
           test -f "$manifest"
           grep -q 'android.permission.SEND_SMS' "$manifest"
           MANIFEST="$manifest" python3 - <<'PY'

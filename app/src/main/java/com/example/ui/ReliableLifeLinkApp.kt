@@ -2,8 +2,10 @@ package com.example.ui
 
 import android.Manifest
 import android.content.Context
+import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
+import android.provider.Settings
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
@@ -74,10 +76,13 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LifecycleEventEffect
 import com.example.BuildConfig
 import com.example.data.Contact
 import com.example.data.EventLog
 import com.example.data.MonitoringRuntimeState
+import com.example.monitoring.SafetyNotificationCapability
 import com.example.monitoring.SmsSetupIssue
 import com.example.monitoring.SmsSetupState
 import com.example.monitoring.userMessage
@@ -127,8 +132,27 @@ fun LifeLinkApp(viewModel: LifeLinkViewModel) {
         permissionsReady = hasCorePermissions(context)
         if (permissionsReady) viewModel.ensureMonitoringStarted()
     }
+    val requestNotificationAccess: () -> Unit = {
+        if (
+            Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+            ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) !=
+            PackageManager.PERMISSION_GRANTED
+        ) {
+            notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+        } else {
+            context.startActivity(
+                Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS)
+                    .putExtra(Settings.EXTRA_APP_PACKAGE, context.packageName)
+            )
+        }
+    }
 
     LaunchedEffect(setupCompleted) {
+        permissionsReady = hasCorePermissions(context)
+        viewModel.refreshSmsSetup()
+        if (setupCompleted && permissionsReady) viewModel.ensureMonitoringStarted()
+    }
+    LifecycleEventEffect(Lifecycle.Event.ON_RESUME) {
         permissionsReady = hasCorePermissions(context)
         viewModel.refreshSmsSetup()
         if (setupCompleted && permissionsReady) viewModel.ensureMonitoringStarted()
@@ -158,9 +182,7 @@ fun LifeLinkApp(viewModel: LifeLinkViewModel) {
                 }
             },
             onRequestNotification = {
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                    notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
-                }
+                requestNotificationAccess()
             },
             onSendTestSms = viewModel::sendTestSms,
             onSetHours = viewModel::updateMonitorHours,
@@ -222,9 +244,7 @@ fun LifeLinkApp(viewModel: LifeLinkViewModel) {
                         }
                     },
                     requestNotificationPermission = {
-                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                            notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
-                        }
+                        requestNotificationAccess()
                     },
                     openSetup = viewModel::restartSetup
                 )
@@ -281,6 +301,31 @@ private fun DashboardTab(
         hasEmergencyContacts = contacts.isNotEmpty()
     )
     val canStart = permissionsReady && smsReady && monitoringBlockReason == null
+    var confirmStop by remember { mutableStateOf(false) }
+
+    if (confirmStop) {
+        AlertDialog(
+            onDismissRequest = { confirmStop = false },
+            title = { Text("모니터링을 중지할까요?") },
+            text = {
+                Text("중지하면 활동 감지와 무활동 긴급 문자가 작동하지 않습니다. 언제든 다시 시작할 수 있습니다.")
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        confirmStop = false
+                        viewModel.stopMonitoring()
+                    },
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = MaterialTheme.colorScheme.error
+                    )
+                ) { Text("모니터링 중지") }
+            },
+            dismissButton = {
+                TextButton(onClick = { confirmStop = false }) { Text("계속 모니터링") }
+            }
+        )
+    }
 
     LazyColumn(
         modifier = Modifier.fillMaxSize().padding(20.dp),
@@ -298,7 +343,7 @@ private fun DashboardTab(
                 }
                 OutlinedButton(
                     onClick = {
-                        if (monitoringActive) viewModel.stopMonitoring() else viewModel.startMonitoring()
+                        if (monitoringActive) confirmStop = true else viewModel.startMonitoring()
                     },
                     modifier = Modifier.height(56.dp).testTag("toggle_monitoring_button")
                 ) {
@@ -520,7 +565,7 @@ private fun DashboardTab(
                 Row(Modifier.padding(16.dp), verticalAlignment = Alignment.Top) {
                     Icon(Icons.Default.Warning, null)
                     Text(
-                        "  이 앱은 119나 의료기기를 대신하지 않습니다. 휴대전화 전원이 꺼지거나 앱이 강제 종료된 경우에는 감지와 문자 발송이 작동하지 않을 수 있습니다.",
+                        "  이 앱은 의료기기가 아니며 질병을 진단·치료·완치·예방하지 않습니다. 119나 전문 안전 서비스를 대신하지 않으며, 휴대전화 전원 꺼짐이나 앱 강제 종료 시 감지와 문자 발송이 작동하지 않을 수 있습니다.",
                         fontSize = 16.sp
                     )
                 }
@@ -851,6 +896,7 @@ internal fun StartupSetupDialog(onComplete: () -> Unit) {
                 Text("한 번 설정하면 휴대전화 활동을 백그라운드에서 확인합니다.")
                 Text("설정 시간 동안 활동이 없거나 매일 안부 확인에 응답하지 않으면 최대 3명의 보호자에게 SIM 문자를 보냅니다. 홈 화면 SOS로 직접 도움을 요청할 수도 있습니다.")
                 Text("문자·SIM 상태·활동 감지·알림 권한은 다음 화면에서 각각 설명하고 요청합니다. 위치 정보는 수집하지 않습니다.", fontSize = 16.sp)
+                Text("이 앱은 의료기기가 아니며 119나 전문 안전 서비스를 대신하지 않습니다.", fontSize = 16.sp)
             }
         },
         confirmButton = {
@@ -893,9 +939,7 @@ private fun hasActivityPermission(context: Context): Boolean =
         PackageManager.PERMISSION_GRANTED
 
 private fun hasNotificationPermission(context: Context): Boolean =
-    Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU ||
-        ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) ==
-        PackageManager.PERMISSION_GRANTED
+    SafetyNotificationCapability.canPost(context)
 
 private fun hasCorePermissions(context: Context): Boolean =
     hasSmsPermission(context) && hasPhoneStatePermission(context) &&

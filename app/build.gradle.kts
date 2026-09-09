@@ -27,8 +27,8 @@ android {
     applicationId = "com.bboysilver.lifelink"
     minSdk = 23
     targetSdk = 36
-    versionCode = 31
-    versionName = "2.2.10"
+    versionCode = 32
+    versionName = "2.2.11"
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
   }
 

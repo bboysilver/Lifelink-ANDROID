@@ -2,7 +2,9 @@ package com.example.data
 
 import android.annotation.SuppressLint
 import android.content.Context
+import android.os.SystemClock
 import com.example.BuildConfig
+import kotlin.math.abs
 import kotlin.math.max
 
 enum class MonitoringRuntimeState { STARTING, RUNNING, ERROR, STOPPED }
@@ -193,13 +195,19 @@ class MonitoringStore(context: Context) {
             .apply()
     }
 
-    fun beginStart(nowMs: Long = System.currentTimeMillis(), reason: String = "모니터링 시작") {
+    fun beginStart(
+        nowMs: Long = System.currentTimeMillis(),
+        reason: String = "모니터링 시작",
+        elapsedRealtimeMs: Long = SystemClock.elapsedRealtime()
+    ) {
         val newDeadline = configuredDeadlineMs(nowMs)
         preferences.edit()
             .putBoolean(KEY_DESIRED_ENABLED, true)
             .putString(KEY_RUNTIME_STATE, MonitoringRuntimeState.STARTING.name)
             .putLong(KEY_STATE_UPDATED_MS, nowMs)
             .putLong(KEY_LAST_HEARTBEAT_MS, 0L)
+            .putLong(KEY_LAST_HEARTBEAT_ELAPSED_MS, elapsedRealtimeMs)
+            .remove(KEY_WATCHDOG_ALERT_TOKEN)
             .putString(KEY_SERVICE_ERROR, "")
             .putLong(KEY_LAST_ACTIVITY_MS, nowMs)
             .putString(KEY_LAST_ACTIVITY_REASON, reason)
@@ -213,6 +221,8 @@ class MonitoringStore(context: Context) {
             .putString(KEY_RUNTIME_STATE, MonitoringRuntimeState.STOPPED.name)
             .putLong(KEY_STATE_UPDATED_MS, nowMs)
             .putLong(KEY_LAST_HEARTBEAT_MS, 0L)
+            .remove(KEY_LAST_HEARTBEAT_ELAPSED_MS)
+            .remove(KEY_WATCHDOG_ALERT_TOKEN)
             .putString(KEY_SERVICE_ERROR, "")
             .apply()
     }
@@ -248,21 +258,62 @@ class MonitoringStore(context: Context) {
             .apply()
     }
 
-    fun markServiceRunning(nowMs: Long = System.currentTimeMillis()) {
+    fun markServiceRunning(
+        nowMs: Long = System.currentTimeMillis(),
+        elapsedRealtimeMs: Long = SystemClock.elapsedRealtime()
+    ) {
         preferences.edit()
             .putString(KEY_RUNTIME_STATE, MonitoringRuntimeState.RUNNING.name)
             .putLong(KEY_STATE_UPDATED_MS, nowMs)
             .putLong(KEY_LAST_HEARTBEAT_MS, nowMs)
+            .putLong(KEY_LAST_HEARTBEAT_ELAPSED_MS, elapsedRealtimeMs)
+            .remove(KEY_WATCHDOG_ALERT_TOKEN)
             .putString(KEY_SERVICE_ERROR, "")
             .apply()
     }
 
-    fun markHeartbeat(nowMs: Long = System.currentTimeMillis()) {
+    fun markHeartbeat(
+        nowMs: Long = System.currentTimeMillis(),
+        elapsedRealtimeMs: Long = SystemClock.elapsedRealtime()
+    ) {
         if (!desiredEnabled) return
         preferences.edit()
             .putString(KEY_RUNTIME_STATE, MonitoringRuntimeState.RUNNING.name)
             .putLong(KEY_LAST_HEARTBEAT_MS, nowMs)
+            .putLong(KEY_LAST_HEARTBEAT_ELAPSED_MS, elapsedRealtimeMs)
             .apply()
+    }
+
+    fun rebaseAfterWallClockChange(
+        nowMs: Long = System.currentTimeMillis(),
+        elapsedRealtimeMs: Long = SystemClock.elapsedRealtime()
+    ): Boolean {
+        if (!desiredEnabled || deadlineMs <= 0L) return false
+        val previousWallMs = preferences.getLong(KEY_LAST_HEARTBEAT_MS, 0L)
+        val previousElapsedMs = preferences.getLong(KEY_LAST_HEARTBEAT_ELAPSED_MS, -1L)
+        if (previousWallMs <= 0L || previousElapsedMs < 0L || elapsedRealtimeMs < previousElapsedMs) {
+            return false
+        }
+
+        val expectedWallMs = previousWallMs + (elapsedRealtimeMs - previousElapsedMs)
+        val clockDeltaMs = nowMs - expectedWallMs
+        if (abs(clockDeltaMs) < CLOCK_CHANGE_TOLERANCE_MS) return false
+
+        val oldDeadlineMs = deadlineMs
+        val editor = preferences.edit()
+            .putLong(KEY_DEADLINE_MS, oldDeadlineMs + clockDeltaMs)
+            .putLong(KEY_LAST_HEARTBEAT_MS, nowMs)
+            .putLong(KEY_LAST_HEARTBEAT_ELAPSED_MS, elapsedRealtimeMs)
+        val lastActivityMs = preferences.getLong(KEY_LAST_ACTIVITY_MS, 0L)
+        if (lastActivityMs > 0L) editor.putLong(KEY_LAST_ACTIVITY_MS, lastActivityMs + clockDeltaMs)
+        if (wasPreAlerted(oldDeadlineMs)) {
+            editor.putLong(KEY_PRE_ALERT_DEADLINE_MS, oldDeadlineMs + clockDeltaMs)
+        }
+        if (wasEmergencyDispatched(oldDeadlineMs)) {
+            editor.putLong(KEY_EMERGENCY_DEADLINE_MS, oldDeadlineMs + clockDeltaMs)
+        }
+        editor.commit()
+        return true
     }
 
     fun markServiceError(message: String, nowMs: Long = System.currentTimeMillis()) {
@@ -272,6 +323,13 @@ class MonitoringStore(context: Context) {
             .putLong(KEY_STATE_UPDATED_MS, nowMs)
             .putString(KEY_SERVICE_ERROR, message)
             .apply()
+    }
+
+    fun claimWatchdogAlert(token: Long): Boolean = synchronized(WATCHDOG_LOCK) {
+        if (preferences.getLong(KEY_WATCHDOG_ALERT_TOKEN, Long.MIN_VALUE) == token) {
+            return@synchronized false
+        }
+        preferences.edit().putLong(KEY_WATCHDOG_ALERT_TOKEN, token).commit()
     }
 
     fun dailyCheckInStatus(nowMs: Long = System.currentTimeMillis()): DailyCheckInStatus =
@@ -522,6 +580,8 @@ class MonitoringStore(context: Context) {
         private const val KEY_RUNTIME_STATE = "runtime_state"
         private const val KEY_STATE_UPDATED_MS = "runtime_state_updated_ms"
         private const val KEY_LAST_HEARTBEAT_MS = "last_heartbeat_ms"
+        private const val KEY_LAST_HEARTBEAT_ELAPSED_MS = "last_heartbeat_elapsed_ms"
+        private const val KEY_WATCHDOG_ALERT_TOKEN = "watchdog_alert_token"
         private const val KEY_SERVICE_ERROR = "service_error"
         private const val KEY_DEVICE_ALIAS = "device_alias"
         private const val KEY_SMS_SUBSCRIPTION_ID = "sms_subscription_id"
@@ -542,7 +602,9 @@ class MonitoringStore(context: Context) {
         const val CURRENT_ONBOARDING_VERSION = 1
         const val HEARTBEAT_TIMEOUT_MS = 150_000L
         const val START_TIMEOUT_MS = 30_000L
+        private const val CLOCK_CHANGE_TOLERANCE_MS = 2_000L
         private val SOS_LOCK = Any()
+        private val WATCHDOG_LOCK = Any()
     }
 }
 

@@ -52,6 +52,29 @@ class MonitoringStoreTest {
     }
 
     @Test
+    fun manualClockChangePreservesRemainingInactivityTime() {
+        val store = MonitoringStore(context)
+        store.monitorHours = 6
+        store.beginStart(nowMs = 10_000L, elapsedRealtimeMs = 1_000L)
+        store.markServiceRunning(nowMs = 11_000L, elapsedRealtimeMs = 2_000L)
+        val oldDeadlineMs = store.deadlineMs
+        store.markPreAlert(oldDeadlineMs)
+
+        val changed = store.rebaseAfterWallClockChange(
+            nowMs = 3_612_000L,
+            elapsedRealtimeMs = 3_000L
+        )
+
+        assertTrue(changed)
+        assertEquals(oldDeadlineMs + 3_600_000L, store.deadlineMs)
+        assertTrue(store.wasPreAlerted(store.deadlineMs))
+        assertEquals(
+            oldDeadlineMs - 12_000L,
+            store.snapshot(nowMs = 3_612_000L).remainingSeconds * 1_000L
+        )
+    }
+
+    @Test
     fun userCanStopMonitoringEvenWhenServiceIsNotRunning() {
         val store = MonitoringStore(context)
         store.beginStart(nowMs = 1_000L)
