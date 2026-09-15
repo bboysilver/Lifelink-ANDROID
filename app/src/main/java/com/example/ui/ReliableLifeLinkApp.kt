@@ -4,6 +4,7 @@ import android.Manifest
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.net.Uri
 import android.os.Build
 import android.provider.Settings
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -103,6 +104,7 @@ fun LifeLinkApp(viewModel: LifeLinkViewModel) {
     val smsSetupState by viewModel.smsSetupState.collectAsState()
     val dailyCheckInDue by viewModel.dailyCheckInDue.collectAsState()
     val sosCountdownSeconds by viewModel.sosCountdownSeconds.collectAsState()
+    val userNotice by viewModel.userNotice.collectAsState()
     var selectedTab by remember { mutableStateOf(0) }
     var permissionsReady by remember { mutableStateOf(hasCorePermissions(context)) }
 
@@ -140,14 +142,11 @@ fun LifeLinkApp(viewModel: LifeLinkViewModel) {
         ) {
             notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
         } else {
-            context.startActivity(
-                Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS)
-                    .putExtra(Settings.EXTRA_APP_PACKAGE, context.packageName)
-            )
+            context.startActivity(notificationSettingsIntent(context.packageName))
         }
     }
 
-    LaunchedEffect(setupCompleted) {
+    LaunchedEffect(setupCompleted, contacts.isNotEmpty()) {
         permissionsReady = hasCorePermissions(context)
         viewModel.refreshSmsSetup()
         if (setupCompleted && permissionsReady) viewModel.ensureMonitoringStarted()
@@ -187,7 +186,8 @@ fun LifeLinkApp(viewModel: LifeLinkViewModel) {
             onSendTestSms = viewModel::sendTestSms,
             onSetHours = viewModel::updateMonitorHours,
             onAdvance = viewModel::advanceSetup,
-            onComplete = viewModel::completeSetupAndStart
+            onComplete = viewModel::completeSetupAndStart,
+            userNotice = userNotice
         )
     }
     when {
@@ -925,6 +925,14 @@ private fun PrivacyDialog(onDismiss: () -> Unit, onOpenPolicy: () -> Unit) {
     )
 }
 
+internal fun notificationSettingsIntent(packageName: String): Intent =
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+        Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS)
+            .putExtra(Settings.EXTRA_APP_PACKAGE, packageName)
+    } else {
+        Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:$packageName"))
+    }
+
 private fun hasSmsPermission(context: Context): Boolean =
     ContextCompat.checkSelfPermission(context, Manifest.permission.SEND_SMS) ==
         PackageManager.PERMISSION_GRANTED
@@ -952,5 +960,5 @@ private fun formatRemaining(seconds: Long): String {
     return String.format(Locale.US, "%02d:%02d:%02d", hours, minutes, remaining)
 }
 
-private const val PRIVACY_POLICY_URL =
+internal const val PRIVACY_POLICY_URL =
     "https://bboysilver.github.io/Lifelink-ANDROID/privacy-policy.html"

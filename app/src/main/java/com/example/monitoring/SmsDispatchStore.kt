@@ -86,7 +86,10 @@ class SmsDispatchStore(context: Context) {
         resultCode: Int,
         nowMs: Long = System.currentTimeMillis()
     ): SmsCallbackOutcome = synchronized(LOCK) {
-        if (statusLocked(eventId).attempt != attempt) return@synchronized SmsCallbackOutcome.IGNORED
+        val current = statusLocked(eventId)
+        if (current.attempt != attempt || current.state != SmsDispatchState.QUEUED) {
+            return@synchronized SmsCallbackOutcome.IGNORED
+        }
         markFailureLocked(eventId, attempt, resultCode, nowMs)
     }
 
@@ -114,14 +117,21 @@ class SmsDispatchStore(context: Context) {
     ): SmsCallbackOutcome = synchronized(LOCK) {
         val current = statusLocked(eventId)
         if (
-            current.state == SmsDispatchState.FAILED_RETRYABLE ||
-            current.state == SmsDispatchState.FAILED_FINAL ||
+            current.state == SmsDispatchState.NOT_QUEUED ||
             current.state == SmsDispatchState.DELIVERED ||
             (current.state == SmsDispatchState.SENT && stage == SmsCallbackStage.SENT) ||
             current.attempt != attempt ||
             partIndex !in 0 until totalParts ||
             preferences.getInt(totalPartsKey(eventId), 0) != totalParts
         ) {
+            return@synchronized SmsCallbackOutcome.IGNORED
+        }
+
+        // A timeout does not prove the SMS failed. Accept late success until a new
+        // attempt starts, so an already sent message is not sent again.
+        val alreadyFailed = current.state == SmsDispatchState.FAILED_RETRYABLE ||
+            current.state == SmsDispatchState.FAILED_FINAL
+        if (alreadyFailed && resultCode != Activity.RESULT_OK) {
             return@synchronized SmsCallbackOutcome.IGNORED
         }
 
@@ -152,6 +162,7 @@ class SmsDispatchStore(context: Context) {
         preferences.edit()
             .putString(stateKey(eventId), newState.name)
             .putLong(updatedAtKey(eventId), nowMs)
+            .putLong(retryAtKey(eventId), 0L)
             .putInt(resultCodeKey(eventId), resultCode)
             .commit()
         if (newState == SmsDispatchState.SENT) SmsCallbackOutcome.SENT else SmsCallbackOutcome.DELIVERED
@@ -174,7 +185,11 @@ class SmsDispatchStore(context: Context) {
 
     fun clearResolved() = synchronized(LOCK) {
         val eventIds = preferences.getStringSet(KEY_EVENT_IDS, emptySet()).orEmpty()
-        val resolvedIds = eventIds.filter { statusLocked(it).isResolved }
+        // Safety callbacks and retries can outlive visible history. Their non-PII
+        // deduplication markers must remain until normal retention cleanup.
+        val resolvedIds = eventIds.filter {
+            statusLocked(it).isResolved && SafetySmsEvent.parse(it) == null
+        }
         if (resolvedIds.isEmpty()) return@synchronized
         val editor = preferences.edit()
         resolvedIds.forEach { removeEventLocked(editor, it) }

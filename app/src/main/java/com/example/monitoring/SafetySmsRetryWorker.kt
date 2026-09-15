@@ -15,9 +15,11 @@ import androidx.work.WorkerParameters
 import com.example.data.AppDatabase
 import com.example.data.Contact
 import com.example.data.MonitoringStore
+import com.example.data.TestSmsVerificationState
 import com.example.data.SafetyIncidentRepository
 import com.example.data.SafetyIncidentSnapshot
 import com.example.data.SafetyRecipient
+import kotlinx.coroutines.CancellationException
 import java.util.concurrent.TimeUnit
 
 internal enum class SafetySmsEventType(val wireName: String) {
@@ -61,6 +63,8 @@ class SafetySmsRetryWorker(
             }
         }
         Result.success()
+    } catch (error: CancellationException) {
+        throw error
     } catch (_: RuntimeException) {
         Result.retry()
     }
@@ -72,7 +76,7 @@ class SafetySmsRetryWorker(
         private const val KEY_EVENT_ID = "event_id"
 
         fun enqueueAt(context: Context, eventId: String, runAtMs: Long) {
-            if (SafetySmsEvent.parse(eventId) == null) return
+            if (SafetySmsEvent.parse(eventId) == null && !SmsDispatchStore.isTestEvent(eventId)) return
             val request = OneTimeWorkRequestBuilder<SafetySmsRetryWorker>()
                 .setInputData(Data.Builder().putString(KEY_EVENT_ID, eventId).build())
                 .setInitialDelay(
@@ -121,6 +125,20 @@ internal class SafetySmsRetryTask(
         incidents.pendingRecipients().map(SafetyRecipient::eventId)
 
     suspend fun run(eventId: String, nowMs: Long = System.currentTimeMillis()): Long? {
+        if (SmsDispatchStore.isTestEvent(eventId)) {
+            val dispatch = SmsDispatchStore(appContext)
+            dispatch.markQueuedTimeoutIfNeeded(eventId, nowMs)
+            val status = dispatch.status(eventId)
+            if (status.state == SmsDispatchState.FAILED_FINAL) {
+                store.recordTestSmsResult(
+                    eventId, TestSmsVerificationState.FAILED,
+                    "시험 문자 발송을 확인하지 못했습니다. 보호자 수신 여부와 SIM 상태를 확인한 뒤 다시 시도해 주세요."
+                )
+            }
+            return if (status.state == SmsDispatchState.QUEUED) {
+                status.updatedAtMs + SmsDispatchStore.CALLBACK_TIMEOUT_MS
+            } else null
+        }
         val event = SafetySmsEvent.parse(eventId) ?: return null
         val snapshot = incidents.get(event.incidentId) ?: return null
         if (snapshot.incident.completedAtMs != null) return null

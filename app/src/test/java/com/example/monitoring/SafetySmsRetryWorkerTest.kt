@@ -9,11 +9,15 @@ import androidx.work.testing.TestListenableWorkerBuilder
 import androidx.work.testing.WorkManagerTestInitHelper
 import com.example.data.AppDatabase
 import com.example.data.Contact
+import com.example.data.MonitoringStore
+import com.example.data.TestSmsVerificationState
 import com.example.data.SafetyIncidentRepository
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
 import org.junit.Assert.assertTrue
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -35,6 +39,22 @@ class SafetySmsRetryWorkerTest {
         withContext(Dispatchers.IO) {
             AppDatabase.getDatabase(context).clearAllTables()
         }
+    }
+
+    @Test
+    fun testSmsWithoutCallbackEndsInFailureWithoutAnotherSend() = runBlocking {
+        val eventId = "test:1000:1"
+        val store = MonitoringStore(context)
+        store.markTestSmsPending(1, eventId)
+        val dispatch = SmsDispatchStore(context)
+        dispatch.beginAttempt(eventId, 1, SmsRetryPolicy.ONE_SHOT, 1_000L)
+
+        val next = SafetySmsRetryTask(context).run(eventId, 1_000L + SmsDispatchStore.CALLBACK_TIMEOUT_MS)
+
+        assertNull(next)
+        assertEquals(TestSmsVerificationState.FAILED, store.testSmsVerification.state)
+        assertEquals(1, dispatch.status(eventId).attempt)
+        assertEquals(SmsDispatchState.FAILED_FINAL, dispatch.status(eventId).state)
     }
 
     @Test

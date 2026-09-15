@@ -75,7 +75,25 @@ class SafetyIncidentRepository(private val db: AppDatabase) {
         dispatchState: String,
         updatedAtMs: Long
     ) = withContext(Dispatchers.IO) {
-        dao.updateRecipientStatus(eventId, attemptCount, dispatchState, updatedAtMs)
+        db.withTransaction {
+            val current = dao.getRecipient(eventId) ?: return@withTransaction
+            if (attemptCount < current.attemptCount) return@withTransaction
+            if (attemptCount == current.attemptCount) {
+                if (updatedAtMs < current.updatedAtMs) return@withTransaction
+                // Foreground and broadcast coroutines may persist snapshots out of
+                // order, including within the same millisecond.
+                if (current.dispatchState == "DELIVERED" && dispatchState != "DELIVERED") {
+                    return@withTransaction
+                }
+                if (current.dispatchState == "SENT" && dispatchState !in listOf("SENT", "DELIVERED")) {
+                    return@withTransaction
+                }
+                if (current.dispatchState != "QUEUED" && dispatchState == "QUEUED") {
+                    return@withTransaction
+                }
+            }
+            dao.updateRecipientStatus(eventId, attemptCount, dispatchState, updatedAtMs)
+        }
     }
 
     suspend fun completeAndRedact(

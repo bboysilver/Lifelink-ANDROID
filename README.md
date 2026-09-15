@@ -6,6 +6,7 @@ LifeLink는 일정 시간 동안 휴대전화 활동이 감지되지 않으면 �
 
 - Foreground Service가 잠금 해제와 반복된 걸음 감지를 강한 활동 신호로 사용합니다. 걸음 센서가 없을 때만 10초 동안 4회 이상 반복된 움직임을 보조 신호로 사용하며, 화면 켜짐이나 한 번의 충격은 활동으로 처리하지 않습니다.
 - 마지막 활동 시각과 마감 시각을 기기에 저장해 앱 프로세스가 다시 생성되어도 남은 시간을 복원합니다.
+- 무활동 사전 경고와 마감시각에는 절전 중 허용되는 비정확 시스템 알람으로도 검사합니다. 서비스와 알람은 같은 사건·문자 상태를 사용하며, Android 절전 정책에 따른 지연 가능성은 남습니다.
 - 재부팅 및 앱 업데이트 후 사용자가 켜 둔 모니터링을 다시 시작합니다.
 - 서비스 heartbeat가 끊기면 `정상 모니터링 중` 대신 오류와 복구 버튼을 표시합니다.
 - 독립 WorkManager 감시자가 서비스 heartbeat 중단을 주기적으로 확인하고, 시스템이 알림을 허용하는 경우 앱 재실행 안내를 표시합니다.
@@ -18,6 +19,7 @@ LifeLink는 일정 시간 동안 휴대전화 활동이 감지되지 않으면 �
 - SMS 지원 여부와 활성 SIM을 확인하고, 멀티 SIM 단말에서는 사용자가 긴급 문자 회선을 직접 선택합니다.
 - Android 6(API 23) 이상의 이동통신사 SMS 지원 스마트폰 또는 SIM 지원 태블릿에서 사용할 수 있습니다. Wi-Fi 전용 기기는 핵심 안전 기능이 작동하지 않으므로 Play 배포 대상에서 제외합니다.
 - 초기 설정 후 각 보호자에게 1회 전용 테스트 문자를 보낼 수 있습니다. 테스트 문자는 자동 재시도하지 않으며 60초 쿨다운이 적용됩니다.
+- 시험 문자 콜백이 2분 동안 오지 않으면 확인 실패로 종료합니다. 늦게 도착한 성공 결과는 다음 발송 시도 전까지 반영합니다.
 - 홈 화면 SOS는 5초 취소 시간을 제공하고, 요청을 기기에 저장한 뒤 보호자 문자 결과를 추적·재시도합니다.
 - 매일 9시·12시·18시 중 선택한 시각에 AlarmManager로 독립 안부 확인을 예약하고, 2시간 동안 응답이 없으면 보호자에게 알립니다.
 - 활성 SIM 변경과 센서 등록 실패를 즉시 감지해 정상 모니터링 표시를 중단합니다.
@@ -64,7 +66,9 @@ keyPassword=...
 
 Signed Android release 워크플로를 실행하려면 Actions secret에 ANDROID_UPLOAD_KEYSTORE_BASE64, ANDROID_UPLOAD_STORE_PASSWORD, ANDROID_UPLOAD_KEY_ALIAS, ANDROID_UPLOAD_KEY_PASSWORD를 등록하고 Repository Variable ANDROID_UPLOAD_CERT_SHA256에 업로드 인증서 지문을 설정합니다. 워크플로는 테스트와 lint를 실행하고 AAB 서명·인증서·SHA-256을 검증한 뒤 증빙 artifact로 보관합니다.
 
-릴리스 AAB는 `app/build/outputs/bundle/release/app-release.aab`에 생성됩니다. 앱 ID는 `com.bboysilver.lifelink`, 현재 버전은 `2.2.11 (32)`입니다. 기존 Play 앱에 올릴 때는 같은 업로드 인증서와 Play Console의 최신 versionCode보다 큰 번호를 사용해야 합니다.
+릴리스 AAB는 `app/build/outputs/bundle/release/app-release.aab`에 생성됩니다. 앱 ID는 `com.bboysilver.lifelink`, 현재 버전은 `2.2.13 (34)`입니다. 기존 Play 앱에 올릴 때는 같은 업로드 인증서와 Play Console의 최신 versionCode보다 큰 번호를 사용해야 합니다.
+
+최근 검토 결과와 정책·출시 조건은 [2026-09-15 검토](docs/review-2026-09-15.md)를 참고하세요.
 
 ## 개인정보
 

@@ -22,10 +22,11 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.AnnotatedString
@@ -162,12 +163,14 @@ internal fun SetupWizardDialog(
     onSendTestSms: (Contact) -> Unit,
     onSetHours: (Int) -> Unit,
     onAdvance: (SetupStep) -> Unit,
-    onComplete: () -> Unit
+    onComplete: () -> Unit,
+    userNotice: String = ""
 ) {
     val page = step.onboardingPage()
-    var consented by remember { mutableStateOf(page != OnboardingPage.GUIDE) }
-    var contactName by remember { mutableStateOf("") }
-    var contactPhone by remember { mutableStateOf("") }
+    val uriHandler = LocalUriHandler.current
+    var consented by rememberSaveable { mutableStateOf(page != OnboardingPage.GUIDE) }
+    var contactName by rememberSaveable { mutableStateOf("") }
+    var contactPhone by rememberSaveable { mutableStateOf("") }
     val permissionsReady = smsGranted && phoneGranted && activityGranted && notificationGranted
     val smsReady = smsSetupState is SmsSetupState.Ready
     val onboardingContact = contacts.firstOrNull()
@@ -204,6 +207,10 @@ internal fun SetupWizardDialog(
                         Text("설정 시간 동안 유효한 활동이 없으면 등록한 보호자에게 SMS를 보냅니다.")
                         Text("119 신고나 의료기기를 대신하지 않으며, 전원 꺼짐·강제 종료·통신 장애에서는 작동하지 않을 수 있습니다.")
                         Text("위치는 수집하지 않습니다. 연락처, 활동 확인 시각과 문자 결과는 이 기기에만 저장됩니다.")
+                        Text("사용자 이름·요청 시각·배터리 상태는 등록한 보호자에게 문자로 전송되며, 통신 요금제에 따라 문자 요금이 발생할 수 있습니다.")
+                        TextButton(onClick = { uriHandler.openUri(PRIVACY_POLICY_URL) }) {
+                            Text("개인정보처리방침 읽기")
+                        }
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Checkbox(checked = consented, onCheckedChange = { consented = it })
                             Text("개인정보 처리방침과 SMS 발송 안내에 동의합니다.")
@@ -305,6 +312,9 @@ internal fun SetupWizardDialog(
                         Text("선택: ${monitorHours}시간")
                         Text("설정을 마치면 백그라운드 안전 모니터링이 시작됩니다.")
                     }
+                }
+                if (userNotice.isNotBlank()) {
+                    Text(userNotice, color = MaterialTheme.colorScheme.error)
                 }
                 Spacer(Modifier.height(4.dp))
             }

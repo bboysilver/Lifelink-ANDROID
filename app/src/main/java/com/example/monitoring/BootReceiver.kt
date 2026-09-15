@@ -16,6 +16,10 @@ class BootReceiver : BroadcastReceiver() {
         MaintenanceWorker.ensureScheduled(context)
         SafetySmsRetryWorker.enqueueRecovery(context)
         if (store.isSetupCompleted && store.desiredEnabled) {
+            InactivityDeadlineScheduler(context).apply {
+                cancel()
+                ensureScheduled()
+            }
             MonitoringWatchdogWorker.ensureScheduled(context)
             try {
                 MonitoringService.start(context)

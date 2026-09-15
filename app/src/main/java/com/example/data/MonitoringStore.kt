@@ -4,6 +4,7 @@ import android.annotation.SuppressLint
 import android.content.Context
 import android.os.SystemClock
 import com.example.BuildConfig
+import com.example.monitoring.InactivityDeadlineScheduler
 import kotlin.math.abs
 import kotlin.math.max
 
@@ -45,6 +46,7 @@ object DeadlineCalculator {
 }
 
 class MonitoringStore(context: Context) {
+    private val appContext = context.applicationContext
     private val preferences = context.getSharedPreferences(FILE_NAME, Context.MODE_PRIVATE)
 
     var monitorHours: Int
@@ -137,6 +139,7 @@ class MonitoringStore(context: Context) {
     }
 
     fun beginSetupReview() {
+        InactivityDeadlineScheduler(appContext).cancel()
         preferences.edit()
             .putBoolean(KEY_SETUP_COMPLETED, false)
             .putBoolean(KEY_DESIRED_ENABLED, false)
@@ -216,6 +219,7 @@ class MonitoringStore(context: Context) {
     }
 
     fun stop(nowMs: Long = System.currentTimeMillis()) {
+        InactivityDeadlineScheduler(appContext).cancel()
         preferences.edit()
             .putBoolean(KEY_DESIRED_ENABLED, false)
             .putString(KEY_RUNTIME_STATE, MonitoringRuntimeState.STOPPED.name)
@@ -234,6 +238,7 @@ class MonitoringStore(context: Context) {
             .putString(KEY_LAST_ACTIVITY_REASON, reason)
             .putLong(KEY_DEADLINE_MS, newDeadline)
             .apply()
+        InactivityDeadlineScheduler(appContext).ensureScheduled(nowMs)
         return newDeadline
     }
 
@@ -270,6 +275,7 @@ class MonitoringStore(context: Context) {
             .remove(KEY_WATCHDOG_ALERT_TOKEN)
             .putString(KEY_SERVICE_ERROR, "")
             .apply()
+        InactivityDeadlineScheduler(appContext).ensureScheduled(nowMs)
     }
 
     fun markHeartbeat(
@@ -313,6 +319,8 @@ class MonitoringStore(context: Context) {
             editor.putLong(KEY_EMERGENCY_DEADLINE_MS, oldDeadlineMs + clockDeltaMs)
         }
         editor.commit()
+        InactivityDeadlineScheduler(appContext).cancel()
+        InactivityDeadlineScheduler(appContext).ensureScheduled(nowMs)
         return true
     }
 

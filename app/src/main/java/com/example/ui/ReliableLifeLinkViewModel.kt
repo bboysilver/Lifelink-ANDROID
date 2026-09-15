@@ -268,10 +268,8 @@ class LifeLinkViewModel(application: Application) : AndroidViewModel(application
     }
 
     fun requestDailyHelp() {
-        if (beginSosCountdown()) {
-            monitoringStore.confirmDailyCheckIn()
-            refreshUi()
-        }
+        // Asking for help (or cancelling SOS) is not a confirmation of safety.
+        beginSosCountdown()
     }
 
     fun startSosCountdown() {
@@ -540,6 +538,7 @@ class LifeLinkViewModel(application: Application) : AndroidViewModel(application
     }
 
     private fun logValidationError(message: String) {
+        _userNotice.value = message
         viewModelScope.launch { repository.insertLog("SYSTEM_ERROR", message) }
     }
 

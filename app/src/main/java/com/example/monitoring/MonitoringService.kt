@@ -10,7 +10,6 @@ import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.content.pm.ServiceInfo
-import android.os.BatteryManager
 import android.os.Build
 import android.os.IBinder
 import androidx.core.app.NotificationCompat
@@ -20,7 +19,6 @@ import androidx.core.content.ContextCompat
 import com.example.MainActivity
 import com.example.data.AppDatabase
 import com.example.data.DailyCheckInPhase
-import com.example.data.DeadlineCalculator
 import com.example.data.LifeLinkRepository
 import com.example.data.MonitoringStore
 import com.example.data.SafetyIncidentRepository
@@ -32,7 +30,6 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 
@@ -125,6 +122,11 @@ class MonitoringService : Service() {
         }
     }
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        // stopSelf() in onCreate does not prevent delivery of this start command.
+        if (startupFailed) {
+            stopSelf()
+            return START_NOT_STICKY
+        }
         when (intent?.action) {
             ACTION_REPORT_SAFE -> confirmSafe("알림에서 무사 확인")
             ACTION_DAILY_SAFE -> confirmDailyCheckIn("매일 안부 알림에서 괜찮음 확인")
@@ -239,47 +241,14 @@ class MonitoringService : Service() {
             !store.wasDailyCheckInAlerted(status.dueAtMs)
     }
     private suspend fun evaluateInactivityDeadline() {
-        val snapshot = store.snapshot()
-        updateOngoingNotification(snapshot.remainingSeconds)
-        if (snapshot.deadlineMs <= 0L) return
-
-        if (
-            snapshot.remainingSeconds in 1..DeadlineCalculator.PRE_ALERT_SECONDS &&
-            !store.wasPreAlerted(snapshot.deadlineMs)
-        ) {
-            store.markPreAlert(snapshot.deadlineMs)
-            showPreAlertNotification()
-            repository.insertLog(
-                "ALERT_WARNING",
-                "설정된 안심 시간 종료 30분 전 사전 알림을 표시했습니다."
-            )
-        }
-
-        if (snapshot.remainingSeconds == 0L && !store.wasEmergencyDispatched(snapshot.deadlineMs)) {
-            dispatchInactivityAlert(snapshot.deadlineMs)
-        }
+        updateOngoingNotification(store.snapshot().remainingSeconds)
+        InactivityDeadlineTask(this, store, repository, incidents).run()
     }
 
     private suspend fun evaluateDailyCheckIn() {
         val result = DailyCheckInTask(this, store, repository).run()
         result.nextRunAtMs?.let { DailyCheckInWorker.enqueueAt(this, result.dueAtMs, it) }
     }
-    private suspend fun dispatchInactivityAlert(deadlineMs: Long) {
-        val batteryPercent = getBatteryPercentageOrNull()
-        val batch = queueSafetyMessage(
-            type = SafetySmsEventType.EMERGENCY,
-            occurredAtMs = deadlineMs,
-            message = EmergencyMessageBuilder.build(store.deviceAlias, batteryPercent),
-            batteryPercent = batteryPercent
-        ) ?: return
-        if (batch.statuses.all { it.isResolved }) {
-            store.markEmergency(deadlineMs)
-            showCompletionNotification("긴급 문자", batch.statuses)
-        } else if (batch.queuedAny) {
-            showRetryNotification("긴급 문자 발송 확인 중")
-        }
-    }
-
     private suspend fun dispatchPendingSos() {
         val eventMs = store.claimPendingSos() ?: store.activeSosEventMs
         if (eventMs <= 0L) return
@@ -302,93 +271,10 @@ class MonitoringService : Service() {
         occurredAtMs: Long,
         message: String,
         batteryPercent: Int?
-    ): SmsBatch? {
-        if (
-            ContextCompat.checkSelfPermission(this, Manifest.permission.SEND_SMS) !=
-            PackageManager.PERMISSION_GRANTED
-        ) {
-            reportBlockingDispatchProblem(
-                "문자 권한이 없어 보호자 문자를 보낼 수 없습니다.",
-                "문자 권한이 필요합니다",
-                "앱 설정에서 문자 권한을 허용해 주세요."
-            )
-            return null
-        }
+    ): SafetySmsBatch? = SafetyMessageDispatcher(
+        this, store, repository, incidents, ::reportBlockingDispatchProblem
+    ).queue(type, occurredAtMs, message, batteryPercent)
 
-        val incidentId = "${type.wireName}:$occurredAtMs"
-        val snapshot = incidents.get(incidentId) ?: run {
-            val contacts = repository.allContacts.first().take(3)
-            if (contacts.isEmpty()) {
-                reportBlockingDispatchProblem(
-                    "등록된 긴급 연락처가 없어 문자를 보낼 수 없습니다.",
-                    "긴급 연락처가 없습니다",
-                    "앱을 열어 긴급 연락처를 등록해 주세요."
-                )
-                return null
-            }
-            val smsSetup = SmsDeviceManager(this, store).inspect()
-            if (smsSetup !is SmsSetupState.Ready) {
-                reportBlockingDispatchProblem(
-                    smsSetup.userMessage(),
-                    "문자 발송 환경 확인 필요",
-                    smsSetup.userMessage()
-                )
-                return null
-            }
-            incidents.getOrCreate(
-                incidentId = incidentId,
-                type = type.wireName,
-                occurredAtMs = occurredAtMs,
-                deviceAlias = store.deviceAlias,
-                message = message,
-                batteryPercent = batteryPercent,
-                subscriptionId = smsSetup.line.subscriptionId,
-                contacts = contacts
-            )
-        }
-
-        if (snapshot.recipients.isEmpty()) {
-            reportBlockingDispatchProblem(
-                "사고 수신자 기록이 없어 문자를 보낼 수 없습니다.",
-                "긴급 연락처 기록 오류",
-                "앱을 열어 긴급 연락처를 다시 확인해 주세요."
-            )
-            return null
-        }
-
-        val sender = EmergencySmsSender(this)
-        var queuedAny = false
-        snapshot.recipients.forEach { recipient ->
-            try {
-                if (
-                    sender.queue(
-                        eventId = recipient.eventId,
-                        contact = recipient.asContact(),
-                        message = snapshot.incident.message,
-                        subscriptionId = snapshot.incident.subscriptionId
-                    ) == SmsQueueResult.QUEUED
-                ) {
-                    queuedAny = true
-                    repository.insertLog(
-                        "SMS_QUEUED",
-                        "${recipient.name} 보호자 문자 발송 결과를 기다리고 있습니다."
-                    )
-                }
-            } catch (error: Exception) {
-                repository.insertLog(
-                    "SMS_FAILED",
-                    "${recipient.name} 보호자 문자 발송 요청에 실패했습니다.",
-                    error.message ?: "알 수 없는 오류"
-                )
-            }
-            incidents.recordStatus(recipient.eventId, sender.status(recipient.eventId))
-        }
-        val statuses = snapshot.recipients.map { sender.status(it.eventId) }
-        if (statuses.all { it.isResolved }) {
-            incidents.completeAndRedact(incidentId)
-        }
-        return SmsBatch(statuses = statuses, queuedAny = queuedAny)
-    }
     private fun showCompletionNotification(label: String, statuses: List<SmsDispatchStatus>) {
         val failedCount = statuses.count { it.state == SmsDispatchState.FAILED_FINAL }
         if (failedCount == 0) {
@@ -540,26 +426,6 @@ class MonitoringService : Service() {
         notifyIfAllowed(MONITORING_NOTIFICATION_ID, buildOngoingNotification(remainingSeconds))
     }
 
-    private fun showPreAlertNotification() {
-        val safeIntent = PendingIntent.getService(
-            this,
-            1,
-            Intent(this, MonitoringService::class.java).setAction(ACTION_REPORT_SAFE),
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-        )
-        val notification = NotificationCompat.Builder(this, SafetyNotificationCapability.ALERT_CHANNEL_ID)
-            .setSmallIcon(android.R.drawable.ic_dialog_alert)
-            .setContentTitle("안전 확인이 필요합니다")
-            .setContentText("30분 안에 '무사합니다'를 눌러 주세요.")
-            .setContentIntent(launchAppIntent())
-            .setPriority(NotificationCompat.PRIORITY_HIGH)
-            .setCategory(NotificationCompat.CATEGORY_ALARM)
-            .setAutoCancel(false)
-            .addAction(0, "무사합니다", safeIntent)
-            .build()
-        notifyIfAllowed(ALERT_NOTIFICATION_ID, notification)
-    }
-
     private fun showAlertNotification(title: String, body: String) {
         val notification = NotificationCompat.Builder(this, SafetyNotificationCapability.ALERT_CHANNEL_ID)
             .setSmallIcon(android.R.drawable.ic_dialog_alert)
@@ -609,21 +475,11 @@ class MonitoringService : Service() {
         )
     }
 
-    private fun getBatteryPercentageOrNull(): Int? {
-        val manager = getSystemService(BatteryManager::class.java)
-        return manager.getIntProperty(BatteryManager.BATTERY_PROPERTY_CAPACITY).takeIf { it in 0..100 }
-    }
-
     private fun formatRemaining(seconds: Long): String {
         val hours = seconds / 3600
         val minutes = (seconds % 3600) / 60
         return if (hours > 0) "${hours}시간 ${minutes}분" else "${minutes}분"
     }
-
-    private data class SmsBatch(
-        val statuses: List<SmsDispatchStatus>,
-        val queuedAny: Boolean
-    )
 
     companion object {
         const val ACTION_START = "com.bboysilver.lifelink.action.START"

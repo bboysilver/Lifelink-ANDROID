@@ -109,4 +109,57 @@ class SafetyIncidentRepositoryTest {
         repository.deleteCompletedBefore(3_002L)
         assertNull(repository.get("sos:2000"))
     }
+
+    @Test
+    fun staleForegroundSnapshotCannotOverwriteConfirmedSmsCallback() = runBlocking {
+        repository.getOrCreate(
+            incidentId = "emergency:1000",
+            type = "emergency",
+            occurredAtMs = 1_000L,
+            deviceAlias = "테스트 기기",
+            message = "긴급 알림",
+            batteryPercent = null,
+            subscriptionId = 1,
+            contacts = listOf(Contact(id = 1, name = "보호자", phoneNumber = "01012345678")),
+            nowMs = 1_000L
+        )
+        val eventId = "emergency:1000:1"
+        repository.updateRecipientStatus(eventId, 1, "SENT", 2_000L)
+
+        repository.updateRecipientStatus(eventId, 1, "QUEUED", 2_000L)
+        repository.updateRecipientStatus(eventId, 0, "NOT_QUEUED", 0L)
+
+        assertEquals("SENT", repository.recipient(eventId)?.dispatchState)
+        assertEquals(1, repository.recipient(eventId)?.attemptCount)
+
+        repository.updateRecipientStatus(eventId, 1, "DELIVERED", 3_000L)
+        repository.updateRecipientStatus(eventId, 1, "SENT", 3_000L)
+
+        assertEquals("DELIVERED", repository.recipient(eventId)?.dispatchState)
+    }
+
+    @Test
+    fun newAttemptAndLateSuccessCanAdvanceFailureState() = runBlocking {
+        repository.getOrCreate(
+            incidentId = "sos:1000",
+            type = "sos",
+            occurredAtMs = 1_000L,
+            deviceAlias = "테스트 기기",
+            message = "SOS",
+            batteryPercent = null,
+            subscriptionId = 1,
+            contacts = listOf(Contact(id = 1, name = "보호자", phoneNumber = "01012345678")),
+            nowMs = 1_000L
+        )
+        val eventId = "sos:1000:1"
+        repository.updateRecipientStatus(eventId, 1, "FAILED_RETRYABLE", 2_000L)
+        repository.updateRecipientStatus(eventId, 2, "QUEUED", 3_000L)
+        repository.updateRecipientStatus(eventId, 1, "FAILED_RETRYABLE", 4_000L)
+        assertEquals("QUEUED", repository.recipient(eventId)?.dispatchState)
+        assertEquals(2, repository.recipient(eventId)?.attemptCount)
+
+        repository.updateRecipientStatus(eventId, 2, "FAILED_FINAL", 4_000L)
+        repository.updateRecipientStatus(eventId, 2, "SENT", 5_000L)
+        assertEquals("SENT", repository.recipient(eventId)?.dispatchState)
+    }
 }

@@ -159,7 +159,7 @@ class SmsDispatchStoreTest {
     }
 
     @Test
-    fun clearingVisibleHistoryKeepsAnUnresolvedSafetyRetry() {
+    fun clearingVisibleHistoryKeepsSuccessfulAndPendingSafetyRecipients() {
         val activeEventId = "emergency:200:2"
         store.beginAttempt(activeEventId, totalParts = 1, nowMs = 1_000L)
         val completedAttempt = store.beginAttempt(EVENT_ID, totalParts = 1, nowMs = 1_000L)!!
@@ -175,8 +175,76 @@ class SmsDispatchStoreTest {
 
         store.clearResolved()
 
-        assertEquals(SmsDispatchState.NOT_QUEUED, store.status(EVENT_ID).state)
+        assertEquals(SmsDispatchState.SENT, store.status(EVENT_ID).state)
         assertEquals(SmsDispatchState.QUEUED, store.status(activeEventId).state)
+        assertNull(store.beginAttempt(EVENT_ID, totalParts = 1, nowMs = 400_000L))
+    }
+
+    @Test
+    fun lateSuccessAfterTimeoutCancelsRetryBeforeAnotherAttempt() {
+        val attempt = store.beginAttempt(EVENT_ID, totalParts = 1, nowMs = 1_000L)!!
+        store.markQueuedTimeoutIfNeeded(EVENT_ID, 1_000L + SmsDispatchStore.CALLBACK_TIMEOUT_MS)
+
+        val outcome = store.recordCallback(
+            SmsCallbackStage.SENT, EVENT_ID, attempt, 0, 1, Activity.RESULT_OK,
+            nowMs = 2_000L + SmsDispatchStore.CALLBACK_TIMEOUT_MS
+        )
+
+        assertEquals(SmsCallbackOutcome.SENT, outcome)
+        assertEquals(0L, store.status(EVENT_ID).retryAtMs)
+        assertNull(store.beginAttempt(EVENT_ID, totalParts = 1, nowMs = 500_000L))
+    }
+
+    @Test
+    fun lateMultipartSuccessPreservesEarlierConfirmedParts() {
+        val attempt = store.beginAttempt(EVENT_ID, totalParts = 2, nowMs = 1_000L)!!
+        store.recordCallback(SmsCallbackStage.SENT, EVENT_ID, attempt, 0, 2, Activity.RESULT_OK, 2_000L)
+        store.markQueuedTimeoutIfNeeded(EVENT_ID, 1_000L + SmsDispatchStore.CALLBACK_TIMEOUT_MS)
+
+        val outcome = store.recordCallback(
+            SmsCallbackStage.SENT, EVENT_ID, attempt, 1, 2, Activity.RESULT_OK,
+            nowMs = 2_000L + SmsDispatchStore.CALLBACK_TIMEOUT_MS
+        )
+
+        assertEquals(SmsCallbackOutcome.SENT, outcome)
+        assertNull(store.beginAttempt(EVENT_ID, totalParts = 2, nowMs = 500_000L))
+    }
+
+    @Test
+    fun lateDeliveryAfterFinalTimeoutStillConfirmsTheSentMessage() {
+        val attempt = store.beginAttempt(EVENT_ID, 1, SmsRetryPolicy.ONE_SHOT, 1_000L)!!
+        store.markQueuedTimeoutIfNeeded(EVENT_ID, 1_000L + SmsDispatchStore.CALLBACK_TIMEOUT_MS)
+
+        val outcome = store.recordCallback(
+            SmsCallbackStage.DELIVERED, EVENT_ID, attempt, 0, 1, Activity.RESULT_OK,
+            nowMs = 2_000L + SmsDispatchStore.CALLBACK_TIMEOUT_MS
+        )
+
+        assertEquals(SmsCallbackOutcome.DELIVERED, outcome)
+        assertEquals(SmsDispatchState.DELIVERED, store.status(EVENT_ID).state)
+    }
+
+    @Test
+    fun queueExceptionCannotOverwriteAlreadyConfirmedSuccess() {
+        val attempt = store.beginAttempt(EVENT_ID, totalParts = 1, nowMs = 1_000L)!!
+        store.recordCallback(SmsCallbackStage.SENT, EVENT_ID, attempt, 0, 1, Activity.RESULT_OK, 2_000L)
+
+        assertEquals(
+            SmsCallbackOutcome.IGNORED,
+            store.markQueueFailure(EVENT_ID, attempt, EmergencySmsSender.RESULT_QUEUE_EXCEPTION, 2_001L)
+        )
+        assertEquals(SmsDispatchState.SENT, store.status(EVENT_ID).state)
+    }
+
+    @Test
+    fun clearingHistoryStillRemovesFinishedTestState() {
+        val eventId = "test:200:1"
+        val attempt = store.beginAttempt(eventId, 1, SmsRetryPolicy.ONE_SHOT, 1_000L)!!
+        store.recordCallback(SmsCallbackStage.SENT, eventId, attempt, 0, 1, Activity.RESULT_OK, 2_000L)
+
+        store.clearResolved()
+
+        assertEquals(SmsDispatchState.NOT_QUEUED, store.status(eventId).state)
     }
     companion object {
         private const val EVENT_ID = "emergency:100:1"

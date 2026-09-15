@@ -1,6 +1,6 @@
 # LifeLink 출시 로드맵
 
-기준 버전: Android 2.2.11 (32)
+기준 버전: Android 2.2.13 (34), 검토일: 2026-09-15
 
 ## 현재 목표: Closed testing
 
@@ -10,7 +10,7 @@
 - GitHub Actions의 `Signed Android release`에서 생성한 서명 AAB만 사용한다.
 - 최종 AAB Manifest에 `com.google.android.gms.permission.AD_ID`가 없어야 한다.
 - Play Console의 광고 ID 및 광고 선언은 모두 `No`로 유지한다.
-- 기존 Closed testing 및 Internal testing의 오래된 아티팩트는 2.2.11 (32)로 교체하거나 비활성화한다.
+- Closed testing은 검증된 2.2.13 (34) 서명 AAB로 업데이트한다. 다른 트랙은 활성 아티팩트와 사용자 영향을 확인한 뒤 정리한다.
 - SMS 권한 용도는 고령자 안전을 위한 물리적 안전·긴급 알림으로 설명한다.
 - Foreground service는 실제 Manifest와 동일하게 `health`만 선언한다.
 - 개인정보처리방침 URL은 `https://bboysilver.github.io/Lifelink-ANDROID/privacy-policy.html`을 사용한다.
@@ -21,6 +21,7 @@
 - Android 9~16, 삼성·픽셀·보급형 단말, 단일 SIM·멀티 SIM을 포함한다.
 - 최초 설정, 테스트 SMS, 재부팅 복구, 절전 모드, SIM 제거, 비행기 모드, 권한 거부를 확인한다.
 - 무활동 경보, 매일 안부 확인, SOS를 각각 반복 시험한다.
+- 화면 꺼짐/Doze 중 사전 알림과 마감 알람, 기록 삭제 중 발송, 늦은 SMS 콜백, 시험 문자 콜백 누락을 시험한다.
 - 문자 누락, 중복 발송, 잘못된 정상 표시, 조용한 서비스 중단을 출시 차단 결함으로 처리한다.
 
 ### Closed testing 통과 기준
@@ -70,7 +71,8 @@
 
 예상 기간: Family 구독 안정화 후 12~16주
 
-- iOS 공개 API는 사용자 승인 없이 SMS를 자동 전송하지 못하므로 서버 heartbeat, 보호자 푸시와 서버 SMS를 중심으로 별도 설계한다.
+- iOS는 보호자 모드를 먼저 제공한다. 공개 API는 사용자 승인 없이 SIM SMS를 자동 전송하지 못하므로 서버가 안부 확인 마감시각을 관리하고 보호자 푸시·서버 SMS를 발송하도록 별도 설계한다.
+- iOS의 정기 heartbeat 누락만으로 전원 꺼짐을 확정하지 않는다. 백그라운드 실행 제한과 실제 연결 단절을 구분해 '연결 확인 필요'로 표시한다.
 - iOS 백그라운드 작업은 실행 시각이 보장되지 않으므로 사용자 기기의 로컬 타이머만 안전 경로로 약속하지 않는다.
 - 보호자 웹에서는 가족 상태, 마지막 연결, 경보 이력과 확인 중 상태만 제공한다.
 - Apple 구독은 StoreKit과 서버 영수증 검증을 사용한다.

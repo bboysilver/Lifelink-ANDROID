@@ -68,6 +68,10 @@
             android:exported="false" />
 
         <receiver
+            android:name=".monitoring.InactivityDeadlineReceiver"
+            android:exported="false" />
+
+        <receiver
             android:name=".monitoring.DailyCheckInReceiver"
             android:exported="false" />
     </application>
