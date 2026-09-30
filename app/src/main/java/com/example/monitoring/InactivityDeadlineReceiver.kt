@@ -25,7 +25,7 @@ class InactivityDeadlineReceiver : BroadcastReceiver() {
         if (intent.action == ACTION_SAFE) {
             val store = MonitoringStore(context)
             if (store.desiredEnabled && store.deadlineMs == deadline) {
-                store.resetDeadline(reason = "사전 알림에서 직접 무사 확인")
+                store.recordActivity(System.currentTimeMillis(), "사전 알림에서 직접 무사 확인")
                 NotificationManagerCompat.from(context).cancel(1002)
             }
             return

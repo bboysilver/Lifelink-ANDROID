@@ -217,7 +217,7 @@ class LifeLinkViewModel(application: Application) : AndroidViewModel(application
 
     fun reportSurvival(reason: String = "사용자 직접 무사 확인") {
 
-        monitoringStore.resetDeadline(reason = reason)
+        monitoringStore.recordActivity(System.currentTimeMillis(), reason)
         if (monitoringStore.desiredEnabled) {
             try {
                 MonitoringService.reset(context, reason)
@@ -579,7 +579,11 @@ class LifeLinkViewModel(application: Application) : AndroidViewModel(application
         _serviceError.value = snapshot.serviceError
         _deviceAlias.value = snapshot.deviceAlias
         _alertState.value = snapshot.alertState
-        _lastSensingMsg.value = snapshot.lastActivityReason
+        _lastSensingMsg.value = if (snapshot.lastActivityMs > 0L) {
+            val time = java.text.SimpleDateFormat("MM/dd HH:mm", java.util.Locale.KOREA)
+                .format(java.util.Date(snapshot.lastActivityMs))
+            "$time · ${snapshot.lastActivityReason}"
+        } else snapshot.lastActivityReason
         if (snapshot.lastActivityMs != 0L && snapshot.lastActivityMs != lastObservedActivityMs) {
             lastObservedActivityMs = snapshot.lastActivityMs
             viewModelScope.launch {

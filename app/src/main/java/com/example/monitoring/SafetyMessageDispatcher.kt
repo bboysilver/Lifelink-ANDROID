@@ -85,6 +85,13 @@ internal class SafetyMessageDispatcher(
         }
 
         val sender = EmergencySmsSender(context)
+        // The Room transaction above suspends. Activity can invalidate a new
+        // inactivity incident before its first SMS was ever handed to a modem.
+        if (!canCreateIncident() && snapshot.recipients.all { sender.status(it.eventId).attempt == 0 }) {
+            incidents.completeAndRedact(incidentId)
+            repository.insertLog("SMS_CANCELLED", "새 활동 확인 또는 중지로 발송 전 무활동 경보를 취소했습니다.")
+            return null
+        }
         var queuedAny = false
         snapshot.recipients.forEach { recipient ->
             try {

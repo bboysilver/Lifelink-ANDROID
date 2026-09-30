@@ -70,6 +70,13 @@ internal class InactivityDeadlineTask(
                     showStatus("긴급 문자 일부 실패", "${failed}명의 보호자에게 3회 시도했지만 발송하지 못했습니다.")
                 }
             } else if (batch?.queuedAny == true) {
+                val format = java.text.SimpleDateFormat("MM/dd HH:mm:ss", java.util.Locale.KOREA)
+                repository.insertLog(
+                    "INACTIVITY_DISPATCH",
+                    "${store.monitorHours}시간 무활동 경보 발송 요청",
+                    "마지막 활동: ${format.format(java.util.Date(snapshot.lastActivityMs))} " +
+                        "(${snapshot.lastActivityReason}), 마감: ${format.format(java.util.Date(deadlineMs))}"
+                )
                 showStatus("긴급 문자 발송 확인 중", "통신사 결과를 확인하며 실패 시 최대 3회 다시 시도합니다.")
             }
         }

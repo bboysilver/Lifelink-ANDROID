@@ -5,6 +5,8 @@ import android.content.Context
 import android.os.SystemClock
 import com.example.BuildConfig
 import com.example.monitoring.InactivityDeadlineScheduler
+import com.example.monitoring.DailyCheckInScheduler
+import com.example.monitoring.MonitoringService
 import kotlin.math.abs
 import kotlin.math.max
 
@@ -231,7 +233,7 @@ class MonitoringStore(context: Context) {
             .apply()
     }
 
-    fun resetDeadline(nowMs: Long = System.currentTimeMillis(), reason: String): Long {
+    fun resetDeadline(nowMs: Long = System.currentTimeMillis(), reason: String): Long = synchronized(ACTIVITY_LOCK) {
         val newDeadline = configuredDeadlineMs(nowMs)
         preferences.edit()
             .putLong(KEY_LAST_ACTIVITY_MS, nowMs)
@@ -239,8 +241,26 @@ class MonitoringStore(context: Context) {
             .putLong(KEY_DEADLINE_MS, newDeadline)
             .apply()
         InactivityDeadlineScheduler(appContext).ensureScheduled(nowMs)
-        return newDeadline
+        newDeadline
     }
+
+    fun recordActivity(activityAtMs: Long, reason: String, nowMs: Long = System.currentTimeMillis()): Boolean =
+        synchronized(ACTIVITY_LOCK) {
+            // Batched sensor events must not move the deadline backwards, or turn
+            // yesterday's movement into activity at the time it was delivered.
+            if (activityAtMs <= 0L || activityAtMs > nowMs ||
+                activityAtMs <= preferences.getLong(KEY_LAST_ACTIVITY_MS, 0L)
+            ) return@synchronized false
+            val daily = dailyCheckInStatus(nowMs)
+            val confirmedDaily = daily.needsResponse && activityAtMs >= daily.dueAtMs &&
+                confirmDailyCheckIn(nowMs) != null
+            if (confirmedDaily) {
+                DailyCheckInScheduler(appContext).ensureScheduled(nowMs)
+                MonitoringService.cancelDailyNotification(appContext)
+            }
+            if (desiredEnabled) resetDeadline(activityAtMs, reason)
+            desiredEnabled || confirmedDaily
+        }
 
     fun initializeDeadlineIfMissing(nowMs: Long = System.currentTimeMillis()) {
         if (desiredEnabled && deadlineMs <= 0L) resetDeadline(nowMs, "초기 설정")
@@ -443,7 +463,7 @@ class MonitoringStore(context: Context) {
     fun confirmDailyCheckIn(nowMs: Long = System.currentTimeMillis()): Long? {
         val status = dailyCheckInStatus(nowMs)
         if (!status.needsResponse || status.dueAtMs <= 0L) return null
-        val advanced = advanceDailyCheckIn(status.dueAtMs)
+        val advanced = advanceDailyCheckIn(status.dueAtMs, nowMs)
         if (advanced) dailyCheckInError = ""
         return status.dueAtMs.takeIf { advanced }
     }
@@ -456,9 +476,11 @@ class MonitoringStore(context: Context) {
         preferences.getLong(KEY_DAILY_ALERTED_DUE_AT_MS, 0L) == dueAtMs
 
     @SuppressLint("ApplySharedPref")
-    fun advanceDailyCheckIn(completedDueAtMs: Long): Boolean {
+    fun advanceDailyCheckIn(completedDueAtMs: Long, notBeforeMs: Long = completedDueAtMs): Boolean {
         if (!dailyCheckInEnabled || dailyNextDueAtMs != completedDueAtMs) return false
         val nextDueAtMs = DailyCheckInCalculator.nextDueAfter(completedDueAtMs, dailyCheckInHour)
+            .takeIf { it > notBeforeMs }
+            ?: DailyCheckInCalculator.nextDueAt(notBeforeMs, dailyCheckInHour)
         return preferences.edit()
             .putLong(KEY_DAILY_NEXT_DUE_AT_MS, nextDueAtMs)
             .remove(KEY_DAILY_PROMPTED_DUE_AT_MS)
@@ -568,6 +590,7 @@ class MonitoringStore(context: Context) {
     }
 
     companion object {
+        private val ACTIVITY_LOCK = Any()
         private const val FILE_NAME = "lifelink_monitoring"
         private const val KEY_MONITOR_HOURS = "monitor_hours"
         // Keep the existing preference key so upgrades preserve the user's intent.

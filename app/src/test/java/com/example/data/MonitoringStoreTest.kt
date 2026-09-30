@@ -24,6 +24,76 @@ class MonitoringStoreTest {
     }
 
     @Test
+    fun activityAfterDailyDueConfirmsCheckInWithoutTouchingSos() {
+        val store = MonitoringStore(context)
+        val due = store.configureDailyCheckIn(18, 1_700_000_000_000L)
+        store.beginStart(due - 60_000L)
+        store.markDailyCheckInPrompted(due, due)
+        val sos = store.beginSos(due + 1_000L)
+
+        assertTrue(store.recordActivity(due + 2_000L, "unlock", due + 2_000L))
+
+        assertTrue(store.dailyNextDueAtMs > due)
+        assertEquals(DailyCheckInPhase.UPCOMING, store.dailyCheckInStatus(due + 2_000L).phase)
+        assertEquals(sos, store.pendingSosEventMs)
+        assertEquals(due + 2_000L + 12 * 60 * 60 * 1_000L, store.deadlineMs)
+    }
+
+    @Test
+    fun delayedActivityBeforeDailyDueDoesNotConfirmTheCheckIn() {
+        val store = MonitoringStore(context)
+        val due = store.configureDailyCheckIn(18, 1_700_000_000_000L)
+        store.beginStart(due - 60_000L)
+        store.markDailyCheckInPrompted(due, due)
+        store.recordActivity(due - 1_000L, "old steps", due + 60_000L)
+        assertEquals(due, store.dailyNextDueAtMs)
+        assertEquals(DailyCheckInPhase.DUE, store.dailyCheckInStatus(due + 60_000L).phase)
+    }
+
+    @Test
+    fun directActivityCanConfirmDailyWhileInactivityMonitoringIsStopped() {
+        val store = MonitoringStore(context)
+        val due = store.configureDailyCheckIn(18, 1_700_000_000_000L)
+        store.markDailyCheckInPrompted(due, due)
+        assertTrue(store.recordActivity(due + 60_000L, "app input", due + 60_000L))
+        assertFalse(store.desiredEnabled)
+        assertTrue(store.dailyNextDueAtMs > due)
+    }
+
+    @Test
+    fun responseAfterMultipleDaysSchedulesAFutureDayRatherThanAnotherOverdueDay() {
+        val store = MonitoringStore(context)
+        val due = store.configureDailyCheckIn(18, 1_700_000_000_000L)
+        store.markDailyCheckInPrompted(due, due)
+        val now = due + 3 * 24 * 60 * 60 * 1_000L
+        store.confirmDailyCheckIn(now)
+        assertTrue(store.dailyNextDueAtMs > now)
+    }
+
+    @Test
+    fun delayedSensorActivityCannotOverwriteNewerPhoneUse() {
+        val store = MonitoringStore(context)
+        store.beginStart(nowMs = 1_000L)
+        assertTrue(store.recordActivity(50_000L, "unlock", nowMs = 60_000L))
+        val currentDeadline = store.deadlineMs
+        assertFalse(store.recordActivity(40_000L, "batched steps", nowMs = 70_000L))
+        assertEquals(currentDeadline, store.deadlineMs)
+        assertEquals("unlock", store.snapshot().lastActivityReason)
+    }
+
+    @Test
+    fun delayedActivityUsesOccurrenceTimeAndCannotResumeStoppedMonitoring() {
+        val store = MonitoringStore(context)
+        store.beginStart(nowMs = 1_000L)
+        assertTrue(store.recordActivity(10_000L, "steps", nowMs = 80_000L))
+        assertEquals(10_000L + 12 * 60 * 60 * 1_000L, store.deadlineMs)
+        assertFalse(store.recordActivity(90_000L, "future", nowMs = 80_000L))
+        store.stop(90_000L)
+        assertFalse(store.recordActivity(100_000L, "unlock", nowMs = 100_000L))
+        assertFalse(store.desiredEnabled)
+    }
+
+    @Test
     fun deadlineAndDesiredStateSurviveStoreRecreation() {
         val firstStore = MonitoringStore(context)
         firstStore.monitorHours = 6

@@ -203,6 +203,7 @@ internal class DailyCheckInTask(
         } else {
             emptyList()
         }
+        if (!isCurrentOverdue(dueAtMs, nowMs)) return DailyCheckInRunResult(dueAtMs)
         if (existingSnapshot == null && contactsForNewIncident.isEmpty()) {
             return blocked(
                 dueAtMs,
@@ -226,6 +227,7 @@ internal class DailyCheckInTask(
             if (smsSetup !is SmsSetupState.Ready) {
                 return blocked(dueAtMs, nowMs, smsSetup.userMessage())
             }
+            if (!isCurrentOverdue(dueAtMs, nowMs)) return DailyCheckInRunResult(dueAtMs)
             incidents.getOrCreate(
                 incidentId = incidentId,
                 type = SafetySmsEventType.DAILY.wireName,
@@ -244,8 +246,17 @@ internal class DailyCheckInTask(
         }
 
         val sender = EmergencySmsSender(appContext)
+        if (!isCurrentOverdue(dueAtMs, nowMs)) {
+            incidents.completeAndRedact(incidentId, nowMs)
+            repository.insertLog("SMS_CANCELLED", "응답 또는 설정 변경으로 안부 미응답 문자의 추가 발송을 취소했습니다.")
+            return DailyCheckInRunResult(dueAtMs)
+        }
         var queuedAny = false
         snapshot.recipients.forEach { recipient ->
+            if (!isCurrentOverdue(dueAtMs, nowMs)) {
+                incidents.completeAndRedact(incidentId, nowMs)
+                return DailyCheckInRunResult(dueAtMs)
+            }
             try {
                 if (
                     sender.queue(
@@ -274,17 +285,23 @@ internal class DailyCheckInTask(
 
         val statuses = snapshot.recipients.map { sender.status(it.eventId, nowMs) }
         if (statuses.all { it.isResolved }) {
-            store.markDailyCheckInAlerted(dueAtMs)
-            store.advanceDailyCheckIn(dueAtMs)
-            store.dailyCheckInError = ""
+            if (store.dailyNextDueAtMs == dueAtMs) {
+                store.markDailyCheckInAlerted(dueAtMs)
+                store.advanceDailyCheckIn(dueAtMs, nowMs)
+                store.dailyCheckInError = ""
+                NotificationManagerCompat.from(appContext).cancel(DAILY_NOTIFICATION_ID)
+            }
             incidents.completeAndRedact(incidentId, nowMs)
             DailyCheckInScheduler(appContext).ensureScheduled(nowMs)
-            NotificationManagerCompat.from(appContext).cancel(DAILY_NOTIFICATION_ID)
             showCompletionNotification(statuses.count { it.state == SmsDispatchState.FAILED_FINAL })
             return DailyCheckInRunResult(dueAtMs)
         }
 
         if (queuedAny) {
+            val format = java.text.SimpleDateFormat("MM/dd HH:mm:ss", java.util.Locale.KOREA)
+            repository.insertLog("DAILY_DISPATCH", "매일 안부 확인 미응답 문자 발송 요청",
+                "설정: ${store.dailyCheckInHour}시, 요청 기준: ${format.format(java.util.Date(dueAtMs))}, " +
+                    "응답 마감: ${format.format(java.util.Date(store.dailyResponseDeadlineAtMs))}")
             showStatusNotification(
                 "안부 미응답 문자 발송 확인 중",
                 "통신사 결과를 확인하며 실패 시 최대 3회 다시 시도합니다."
@@ -303,6 +320,11 @@ internal class DailyCheckInTask(
             .minOrNull()
             ?.coerceAtLeast(nowMs + 1_000L)
         return DailyCheckInRunResult(dueAtMs, nextRunAtMs)
+    }
+    private fun isCurrentOverdue(dueAtMs: Long, nowMs: Long): Boolean {
+        val current = store.dailyCheckInStatus(nowMs)
+        return current.phase == DailyCheckInPhase.OVERDUE && current.dueAtMs == dueAtMs &&
+            store.wasDailyCheckInPrompted(dueAtMs)
     }
     private suspend fun blocked(
         dueAtMs: Long,
@@ -332,7 +354,7 @@ internal class DailyCheckInTask(
         )
             .setSmallIcon(android.R.drawable.ic_dialog_info)
             .setContentTitle("오늘도 괜찮으신가요?")
-            .setContentText("2시간 안에 안부를 알려 주세요.")
+            .setContentText("2시간 안에 괜찮아요를 눌러 주세요. 감지된 활동으로도 자동 완료됩니다.")
             .setContentIntent(launchAppIntent())
             .setPriority(NotificationCompat.PRIORITY_HIGH)
             .setCategory(NotificationCompat.CATEGORY_REMINDER)

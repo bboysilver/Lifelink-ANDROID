@@ -81,38 +81,9 @@ class MonitoringService : Service() {
             }
         }
 
-        if (store.desiredEnabled) {
-            sensorMonitor = SensorMonitor(this) { reason ->
-                if (store.desiredEnabled) store.resetDeadline(reason = reason)
-            }
-            if (sensorMonitor.start() == SensorStartResult.FAILED) {
-                failStartup("활동 센서를 시작할 수 없습니다. 기기를 다시 시작하거나 센서 권한을 확인해 주세요.")
-                return
-            }
-        }
+        if (!ensureActivitySensors()) return
 
-        if (requiresSms) {
-            smsSubscriptionMonitor = SmsSubscriptionMonitor(this) { state ->
-                if (state !is SmsSetupState.Ready && requiresSmsMonitoring()) {
-                    val message = state.userMessage()
-                    startupFailed = true
-                    store.markServiceError(message)
-                    if (store.dailyCheckInStatus().phase == DailyCheckInPhase.OVERDUE) {
-                        store.dailyCheckInError = message
-                    }
-                    serviceScope.launch {
-                        repository.insertLog("SYSTEM_ERROR", "SIM 변경으로 안전 기능을 중단했습니다.", message)
-                    }
-                    showAlertNotification("SIM 상태 확인 필요", message)
-                    if (!store.desiredEnabled && store.sosEventMs > 0L) store.clearSos()
-                    stopSelf()
-                }
-            }
-            if (!smsSubscriptionMonitor.start()) {
-                failStartup("SIM 변경 상태를 감시할 수 없습니다.")
-                return
-            }
-        }
+        if (!ensureSmsSubscriptionMonitor()) return
         if (store.desiredEnabled) {
             val nowMs = System.currentTimeMillis()
             store.markServiceRunning(nowMs)
@@ -127,6 +98,10 @@ class MonitoringService : Service() {
             stopSelf()
             return START_NOT_STICKY
         }
+        // A service initially created for SOS can later be reused for monitoring.
+        // Do not report RUNNING without registering its activity listeners.
+        if (!ensureActivitySensors()) return START_NOT_STICKY
+        if (!ensureSmsSubscriptionMonitor()) return START_NOT_STICKY
         when (intent?.action) {
             ACTION_REPORT_SAFE -> confirmSafe("알림에서 무사 확인")
             ACTION_DAILY_SAFE -> confirmDailyCheckIn("매일 안부 알림에서 괜찮음 확인")
@@ -160,6 +135,46 @@ class MonitoringService : Service() {
         }
     }
     override fun onBind(intent: Intent?): IBinder? = null
+
+    private fun ensureActivitySensors(): Boolean {
+        if (!store.desiredEnabled) return true
+        if (!::sensorMonitor.isInitialized) {
+            sensorMonitor = SensorMonitor(this) { reason, activityAtMs ->
+                store.recordActivity(activityAtMs, reason)
+            }
+        }
+        if (sensorMonitor.start() != SensorStartResult.FAILED) return true
+        failStartup("활동 센서를 시작할 수 없습니다. 기기를 다시 시작하거나 센서 권한을 확인해 주세요.")
+        return false
+    }
+
+    private fun ensureSmsSubscriptionMonitor(): Boolean {
+        if (!requiresSmsMonitoring() || ::smsSubscriptionMonitor.isInitialized) return true
+        val setup = SmsDeviceManager(this, store).inspect()
+        if (setup !is SmsSetupState.Ready) {
+            failStartup(setup.userMessage())
+            return false
+        }
+        smsSubscriptionMonitor = SmsSubscriptionMonitor(this) { state ->
+            if (state !is SmsSetupState.Ready && requiresSmsMonitoring()) {
+                val message = state.userMessage()
+                startupFailed = true
+                store.markServiceError(message)
+                if (store.dailyCheckInStatus().phase == DailyCheckInPhase.OVERDUE) {
+                    store.dailyCheckInError = message
+                }
+                serviceScope.launch {
+                    repository.insertLog("SYSTEM_ERROR", "SIM 변경으로 안전 기능을 중단했습니다.", message)
+                }
+                showAlertNotification("SIM 상태 확인 필요", message)
+                if (!store.desiredEnabled && store.sosEventMs > 0L) store.clearSos()
+                stopSelf()
+            }
+        }
+        if (smsSubscriptionMonitor.start()) return true
+        failStartup("SIM 변경 상태를 감시할 수 없습니다.")
+        return false
+    }
 
     override fun onDestroy() {
         if (::sensorMonitor.isInitialized) sensorMonitor.stop()
@@ -331,7 +346,7 @@ class MonitoringService : Service() {
     }
 
     private fun confirmSafe(reason: String) {
-        store.resetDeadline(reason = reason)
+        store.recordActivity(System.currentTimeMillis(), reason)
         NotificationManagerCompat.from(this).cancel(ALERT_NOTIFICATION_ID)
         serviceScope.launch {
             repository.insertLog("SENSOR_RESET", "사용자가 알림에서 무사함을 확인했습니다.")

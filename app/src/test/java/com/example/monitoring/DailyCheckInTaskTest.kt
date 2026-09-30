@@ -55,6 +55,21 @@ class DailyCheckInTaskTest {
     }
 
     @Test
+    fun automaticActivityBeforeLateMorningWorkerPreventsDailySms() = runBlocking {
+        val due = store.configureDailyCheckIn(18, 1_700_000_000_000L)
+        store.beginStart(due - 60_000L)
+        store.markDailyCheckInPrompted(due, due)
+        store.recordActivity(due + 60_000L, "unlock", due + 60_000L)
+
+        val result = DailyCheckInTask(context, store, repository)
+            .run(due + 13 * 60 * 60 * 1_000L)
+
+        assertEquals(null, result.nextRunAtMs)
+        assertEquals("", store.dailyCheckInError)
+        assertEquals(DailyCheckInPhase.UPCOMING, store.dailyCheckInStatus(due + 13 * 60 * 60 * 1_000L).phase)
+    }
+
+    @Test
     fun delayedPromptGetsAFullTwoHourResponseWindow() = runBlocking {
         val dueAtMs = store.configureDailyCheckIn(hour = 18, nowMs = 1_700_000_000_000L)
         val displayedAtMs = dueAtMs + 60 * 60 * 1_000L

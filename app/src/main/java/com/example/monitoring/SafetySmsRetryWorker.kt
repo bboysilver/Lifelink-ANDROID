@@ -145,6 +145,20 @@ internal class SafetySmsRetryTask(
         val recipient = snapshot.recipients.firstOrNull { it.eventId == eventId } ?: return null
         val sender = EmergencySmsSender(appContext)
 
+        val superseded = when (event.type) {
+            SafetySmsEventType.EMERGENCY -> !store.desiredEnabled || store.deadlineMs != event.occurredAtMs
+            SafetySmsEventType.DAILY -> !store.dailyCheckInEnabled || store.dailyNextDueAtMs != event.occurredAtMs
+            SafetySmsEventType.SOS -> false
+        }
+        if (superseded && (event.type == SafetySmsEventType.DAILY ||
+            snapshot.recipients.all { sender.status(it.eventId, nowMs).attempt == 0 })
+        ) {
+            // Recovery must not start a never-sent alert from a superseded deadline.
+            // Already attempted incidents keep their retry/delivery tracking.
+            incidents.completeAndRedact(event.incidentId, nowMs)
+            return null
+        }
+
         var status = sender.status(eventId, nowMs)
         incidents.recordStatus(eventId, status)
         if (status.isResolved) {
@@ -156,6 +170,13 @@ internal class SafetySmsRetryTask(
             PackageManager.PERMISSION_GRANTED
         ) {
             return nowMs + BLOCKED_RETRY_MS
+        }
+
+        if (event.type == SafetySmsEventType.DAILY &&
+            (!store.dailyCheckInEnabled || store.dailyNextDueAtMs != event.occurredAtMs)
+        ) {
+            incidents.completeAndRedact(event.incidentId, nowMs)
+            return null
         }
 
         try {
@@ -198,11 +219,13 @@ internal class SafetySmsRetryTask(
             SafetySmsEventType.EMERGENCY -> store.markEmergency(event.occurredAtMs)
             SafetySmsEventType.SOS -> store.completeActiveSos(event.occurredAtMs)
             SafetySmsEventType.DAILY -> {
-                store.markDailyCheckInAlerted(event.occurredAtMs)
-                store.advanceDailyCheckIn(event.occurredAtMs)
-                store.dailyCheckInError = ""
-                DailyCheckInScheduler(appContext).ensureScheduled(nowMs)
-                NotificationManagerCompat.from(appContext).cancel(DailyCheckInTask.DAILY_NOTIFICATION_ID)
+                if (store.dailyNextDueAtMs == event.occurredAtMs) {
+                    store.markDailyCheckInAlerted(event.occurredAtMs)
+                    store.advanceDailyCheckIn(event.occurredAtMs, nowMs)
+                    store.dailyCheckInError = ""
+                    DailyCheckInScheduler(appContext).ensureScheduled(nowMs)
+                    NotificationManagerCompat.from(appContext).cancel(DailyCheckInTask.DAILY_NOTIFICATION_ID)
+                }
             }
         }
         incidents.completeAndRedact(event.incidentId, nowMs)

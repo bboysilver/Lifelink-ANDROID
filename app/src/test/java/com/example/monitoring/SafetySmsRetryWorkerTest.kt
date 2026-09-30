@@ -31,6 +31,7 @@ class SafetySmsRetryWorkerTest {
     @Before
     fun setUp() = runBlocking {
         context = ApplicationProvider.getApplicationContext()
+        context.getSharedPreferences("lifelink_monitoring", Context.MODE_PRIVATE).edit().clear().commit()
         WorkManagerTestInitHelper.initializeTestWorkManager(context)
         context.getSharedPreferences(SmsDispatchStore.FILE_NAME, Context.MODE_PRIVATE)
             .edit()
@@ -60,8 +61,8 @@ class SafetySmsRetryWorkerTest {
     @Test
     fun recoveryWorkerExecutesAndReschedulesAPendingImmutableIncident() = runBlocking {
         SafetyIncidentRepository(AppDatabase.getDatabase(context)).getOrCreate(
-            incidentId = "emergency:5000",
-            type = "emergency",
+            incidentId = "sos:5000",
+            type = "sos",
             occurredAtMs = 5_000L,
             deviceAlias = "테스트 기기",
             message = "저장된 메시지",
@@ -79,5 +80,43 @@ class SafetySmsRetryWorkerTest {
             .getWorkInfosByTag(SafetySmsRetryWorker.WORK_TAG)
             .get(3, TimeUnit.SECONDS)
         assertTrue(scheduled.isNotEmpty())
+    }
+
+    @Test
+    fun failedDailySmsDoesNotRetryAfterAutomaticActivityConfirmation() = runBlocking {
+        val store = MonitoringStore(context)
+        val due = store.configureDailyCheckIn(18, 1_700_000_000_000L)
+        store.beginStart(due - 60_000L)
+        store.markDailyCheckInPrompted(due, due)
+        val event = "daily:$due:1"
+        val incidents = SafetyIncidentRepository(AppDatabase.getDatabase(context))
+        incidents.getOrCreate("daily:$due", "daily", due, "test", "test", null, 1,
+            listOf(Contact(id = 1, name = "guardian", phoneNumber = "01012345678")))
+        val failedAt = due + 2 * 60 * 60 * 1_000L
+        val dispatch = SmsDispatchStore(context)
+        val attempt = dispatch.beginAttempt(event, 1, nowMs = failedAt)!!
+        dispatch.markQueueFailure(event, attempt, android.telephony.SmsManager.RESULT_ERROR_NO_SERVICE, failedAt)
+        store.recordActivity(failedAt + 1_000L, "unlock", failedAt + 1_000L)
+
+        assertNull(SafetySmsRetryTask(context).run(event, failedAt + 5 * 60_000L))
+        assertEquals(1, dispatch.status(event).attempt)
+        assertTrue(incidents.get("daily:$due")!!.incident.completedAtMs != null)
+    }
+
+    @Test
+    fun recoveryDoesNotStartAnUnsentInactivityAlertAfterNewActivity() = runBlocking {
+        val store = MonitoringStore(context)
+        store.beginStart(1_000L)
+        val deadline = store.deadlineMs
+        val incidents = SafetyIncidentRepository(AppDatabase.getDatabase(context))
+        incidents.getOrCreate(
+            "emergency:$deadline", "emergency", deadline, "test", "test", null, 1,
+            listOf(Contact(id = 1, name = "guardian", phoneNumber = "01012345678"))
+        )
+        store.recordActivity(deadline + 1_000L, "unlock", deadline + 1_000L)
+
+        assertNull(SafetySmsRetryTask(context).run("emergency:$deadline:1", deadline + 2_000L))
+        assertEquals(0, SmsDispatchStore(context).status("emergency:$deadline:1").attempt)
+        assertTrue(incidents.get("emergency:$deadline")!!.incident.completedAtMs != null)
     }
 }

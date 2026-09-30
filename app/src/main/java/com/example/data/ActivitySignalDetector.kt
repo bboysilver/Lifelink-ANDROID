@@ -19,7 +19,9 @@ internal class RepeatedMotionDetector(
     private var lastDetectionMs = Long.MIN_VALUE
 
     fun record(nowMs: Long): Boolean {
-        if (eventTimes.isNotEmpty() && nowMs < eventTimes.last()) eventTimes.clear()
+        if ((eventTimes.isNotEmpty() && nowMs < eventTimes.last()) ||
+            (lastDetectionMs != Long.MIN_VALUE && nowMs < lastDetectionMs)
+        ) reset()
         if (lastDetectionMs != Long.MIN_VALUE && nowMs - lastDetectionMs < cooldownMs) return false
 
         while (eventTimes.isNotEmpty() && nowMs - eventTimes.first() > windowMs) {
@@ -34,5 +36,10 @@ internal class RepeatedMotionDetector(
             eventTimes.clear()
         }
         return repeated
+    }
+
+    fun reset() {
+        eventTimes.clear()
+        lastDetectionMs = Long.MIN_VALUE
     }
 }

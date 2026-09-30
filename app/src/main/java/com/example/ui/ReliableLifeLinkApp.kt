@@ -440,6 +440,7 @@ private fun DashboardTab(
                             modifier = Modifier.testTag("remaining_time_text")
                         )
                         Text("마지막 활동: $lastActivity", maxLines = 2, overflow = TextOverflow.Ellipsis)
+                        Text("휴대전화를 사용해도 시간이 갱신되지 않으면 '무사합니다'를 눌러 주세요.", fontSize = 14.sp)
                     }
                 }
             }
@@ -479,7 +480,8 @@ private fun DashboardTab(
             Card(modifier = Modifier.fillMaxWidth()) {
                 Column(Modifier.padding(16.dp)) {
                     Text("매일 안부 확인", fontWeight = FontWeight.Bold)
-                    Text("정한 시각부터 2시간 안에 응답하지 않으면 보호자에게 알립니다.", fontSize = 16.sp)
+                    Text("정한 시각부터 2시간 동안 활동도 응답도 없으면 보호자에게 알립니다.", fontSize = 16.sp)
+                    Text("모니터링 중 잠금 해제·반복 걸음 등 활동이 감지되면 자동 완료됩니다. 12시간 등 무활동 설정과는 별도입니다.", fontSize = 14.sp)
                     if (dailyScheduleText.isNotBlank()) {
                         Text(dailyScheduleText, fontSize = 16.sp, fontWeight = FontWeight.Bold)
                     }
@@ -894,7 +896,7 @@ internal fun StartupSetupDialog(onComplete: () -> Unit) {
                 verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 Text("한 번 설정하면 휴대전화 활동을 백그라운드에서 확인합니다.")
-                Text("설정 시간 동안 활동이 없거나 매일 안부 확인에 응답하지 않으면 최대 3명의 보호자에게 SIM 문자를 보냅니다. 홈 화면 SOS로 직접 도움을 요청할 수도 있습니다.")
+                Text("설정 시간 동안 활동이 없거나 매일 안부 확인 시간에 활동도 응답도 없으면 최대 3명의 보호자에게 SIM 문자를 보냅니다. 홈 화면 SOS로 직접 도움을 요청할 수도 있습니다.")
                 Text("문자·SIM 상태·활동 감지·알림 권한은 다음 화면에서 각각 설명하고 요청합니다. 위치 정보는 수집하지 않습니다.", fontSize = 16.sp)
                 Text("이 앱은 의료기기가 아니며 119나 전문 안전 서비스를 대신하지 않습니다.", fontSize = 16.sp)
             }

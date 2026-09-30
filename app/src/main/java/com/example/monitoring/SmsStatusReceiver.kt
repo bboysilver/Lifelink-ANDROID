@@ -122,6 +122,9 @@ class SmsStatusReceiver : BroadcastReceiver() {
         val repository = LifeLinkRepository(AppDatabase.getDatabase(context))
         val maskedPhone = "수신 번호: ****$phoneSuffix"
         val isTest = SmsDispatchStore.isTestEvent(eventId)
+        val event = SafetySmsEvent.parse(eventId)
+        val dailyNoLongerPending = event?.type == SafetySmsEventType.DAILY &&
+            MonitoringStore(context).let { !it.dailyCheckInEnabled || it.dailyNextDueAtMs != event.occurredAtMs }
         when (outcome) {
             SmsCallbackOutcome.SENT -> repository.insertLog(
                 "SMS_SENT",
@@ -137,6 +140,8 @@ class SmsStatusReceiver : BroadcastReceiver() {
                 "SMS_FAILED",
                 if (isTest) {
                     "$contactName 보호자 시험 문자 발송에 실패했습니다. 자동 재시도하지 않습니다."
+                } else if (dailyNoLongerPending) {
+                    "$contactName 보호자 안부 문자 발송에 실패했습니다. 안부 확인 완료 또는 설정 변경으로 재시도하지 않습니다."
                 } else {
                     "$contactName 보호자 문자 발송에 실패해 5분 뒤 다시 시도합니다."
                 },
