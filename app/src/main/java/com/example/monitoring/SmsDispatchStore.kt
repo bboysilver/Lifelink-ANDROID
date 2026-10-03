@@ -179,8 +179,11 @@ class SmsDispatchStore(context: Context) {
             0L
         }
 
-    fun pruneExpired(nowMs: Long = System.currentTimeMillis()): Int = synchronized(LOCK) {
-        pruneExpiredLocked(nowMs)
+    fun pruneExpired(
+        nowMs: Long = System.currentTimeMillis(),
+        preserveEventIds: Set<String> = emptySet()
+    ): Int = synchronized(LOCK) {
+        pruneExpiredLocked(nowMs, preserveEventIds)
     }
 
     fun clearResolved() = synchronized(LOCK) {
@@ -218,11 +221,11 @@ class SmsDispatchStore(context: Context) {
         return if (retryable) SmsCallbackOutcome.FAILED_RETRYABLE else SmsCallbackOutcome.FAILED_FINAL
     }
 
-    private fun pruneExpiredLocked(nowMs: Long): Int {
+    private fun pruneExpiredLocked(nowMs: Long, preserveEventIds: Set<String>): Int {
         val eventIds = preferences.getStringSet(KEY_EVENT_IDS, emptySet()).orEmpty()
         val expired = eventIds.filter { eventId ->
             val updatedAtMs = preferences.getLong(updatedAtKey(eventId), 0L)
-            updatedAtMs > 0L && nowMs - updatedAtMs >= RETENTION_MS
+            eventId !in preserveEventIds && updatedAtMs > 0L && nowMs - updatedAtMs >= RETENTION_MS
         }
         if (expired.isEmpty()) return 0
 

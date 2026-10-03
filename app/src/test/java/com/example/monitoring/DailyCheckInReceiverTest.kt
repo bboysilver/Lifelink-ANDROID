@@ -8,6 +8,8 @@ import androidx.work.WorkManager
 import androidx.work.testing.WorkManagerTestInitHelper
 import com.example.data.MonitoringStore
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import org.junit.Assert.assertNull
 import org.junit.Before
 import org.junit.Test
@@ -46,5 +48,31 @@ class DailyCheckInReceiverTest {
             .get(3, TimeUnit.SECONDS)
         assertFalse(work.isEmpty())
         assertNull(shadowOf(context).nextStartedService)
+    }
+
+    @Test
+    fun notificationResponseIsSavedWithoutSimOrActivityPermission() {
+        val now = System.currentTimeMillis()
+        val store = MonitoringStore(context)
+        store.configureDailyCheckIn(9, now)
+        val due = store.deferDailyCheckInToNow(now - 1_000L)
+        store.markDailyCheckInPrompted(due, now - 1_000L)
+        DailyCheckInReceiver().onReceive(context, Intent(DailyCheckInReceiver.ACTION_SAFE)
+            .putExtra(DailyCheckInReceiver.EXTRA_DUE_AT, due))
+        assertTrue(store.dailyNextDueAtMs > now)
+        assertNull(shadowOf(context).nextStartedService)
+    }
+
+    @Test
+    fun staleResponseCannotConfirmAnotherDailyPrompt() {
+        val now = System.currentTimeMillis()
+        val store = MonitoringStore(context)
+        store.configureDailyCheckIn(9, now)
+        val due = store.deferDailyCheckInToNow(now - 1_000L)
+        store.markDailyCheckInPrompted(due, now - 1_000L)
+        DailyCheckInReceiver().onReceive(context, Intent(DailyCheckInReceiver.ACTION_SAFE)
+            .putExtra(DailyCheckInReceiver.EXTRA_DUE_AT, due - 1L))
+        assertEquals(due, store.dailyNextDueAtMs)
+        assertTrue(store.dailyCheckInStatus(now).needsResponse)
     }
 }

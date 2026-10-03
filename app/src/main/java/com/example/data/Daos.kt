@@ -3,6 +3,8 @@ package com.example.data
 import androidx.room.*
 import kotlinx.coroutines.flow.Flow
 
+enum class ContactInsertResult { ADDED, DUPLICATE, LIMIT_REACHED }
+
 @Dao
 interface ContactDao {
     @Query("SELECT * FROM contacts ORDER BY createdAt ASC")
@@ -16,6 +18,27 @@ interface ContactDao {
 
     @Query("SELECT COUNT(*) FROM contacts")
     suspend fun getContactCount(): Int
+
+    @Query("SELECT * FROM contacts")
+    suspend fun getContactSnapshot(): List<Contact>
+
+    @Transaction
+    suspend fun insertContactIfAllowed(contact: Contact): ContactInsertResult {
+        val existing = getContactSnapshot()
+        if (existing.any { it.phoneNumber.filter(Char::isDigit) == contact.phoneNumber.filter(Char::isDigit) }) {
+            return ContactInsertResult.DUPLICATE
+        }
+        if (existing.size >= 3) return ContactInsertResult.LIMIT_REACHED
+        insertContact(contact)
+        return ContactInsertResult.ADDED
+    }
+
+    @Transaction
+    suspend fun deleteContactIfAllowed(contact: Contact, requireRemainingContact: Boolean): Boolean {
+        if (requireRemainingContact && getContactCount() <= 1) return false
+        deleteContact(contact)
+        return true
+    }
 }
 
 @Dao

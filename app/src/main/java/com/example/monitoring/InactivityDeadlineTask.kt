@@ -8,6 +8,7 @@ import android.content.Context
 import android.content.Intent
 import android.os.BatteryManager
 import android.os.Build
+import android.os.SystemClock
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import com.example.MainActivity
@@ -29,15 +30,18 @@ internal class InactivityDeadlineTask(
 
     suspend fun run(
         expectedDeadlineMs: Long? = null,
-        nowMs: Long = System.currentTimeMillis()
+        nowMs: Long = System.currentTimeMillis(),
+        elapsedRealtimeMs: Long = SystemClock.elapsedRealtime()
     ) = RUN_LOCK.withLock {
+        store.rebaseAfterWallClockChange(nowMs, elapsedRealtimeMs)
         val snapshot = store.snapshot(nowMs)
         if (!snapshot.desiredEnabled || !store.isSetupCurrent || snapshot.deadlineMs <= 0L ||
             (expectedDeadlineMs != null && expectedDeadlineMs != snapshot.deadlineMs)
         ) return@withLock
 
         val deadlineMs = snapshot.deadlineMs
-        if (store.wasEmergencyDispatched(deadlineMs)) return@withLock
+        val eventMs = store.inactivityEventMs
+        if (store.wasEmergencyDispatched(eventMs)) return@withLock
         if (snapshot.remainingSeconds in 1..DeadlineCalculator.PRE_ALERT_SECONDS &&
             !store.wasPreAlerted(deadlineMs)
         ) {
@@ -56,19 +60,14 @@ internal class InactivityDeadlineTask(
                 }
             }.queue(
                 type = SafetySmsEventType.EMERGENCY,
-                occurredAtMs = deadlineMs,
+                occurredAtMs = eventMs,
                 message = EmergencyMessageBuilder.build(store.deviceAlias, battery),
                 batteryPercent = battery,
-                canCreateIncident = { store.desiredEnabled && store.deadlineMs == deadlineMs }
+                canCreateIncident = { store.desiredEnabled && store.inactivityEventMs == eventMs }
             )
             if (batch != null && batch.statuses.all { it.isResolved }) {
-                store.markEmergency(deadlineMs)
-                val failed = batch.statuses.count { it.state == SmsDispatchState.FAILED_FINAL }
-                if (failed == 0) {
-                    showStatus("긴급 문자 발송 확인", "모든 보호자 문자 발송이 확인되었습니다.")
-                } else {
-                    showStatus("긴급 문자 일부 실패", "${failed}명의 보호자에게 3회 시도했지만 발송하지 못했습니다.")
-                }
+                store.markEmergency(eventMs)
+                SafetySmsStatusNotifier.showCompletion(appContext, SafetySmsEventType.EMERGENCY, batch.statuses)
             } else if (batch?.queuedAny == true) {
                 val format = java.text.SimpleDateFormat("MM/dd HH:mm:ss", java.util.Locale.KOREA)
                 repository.insertLog(

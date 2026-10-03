@@ -98,7 +98,9 @@ class SensorMonitorTest {
         sendEvent(sensor, baseNanos + 1_000_000_000L)
         sendEvent(sensor, baseNanos + 2_000_000_000L)
 
-        assertEquals(listOf(receiptWallMs - 8_000L), events)
+        assertEquals(1, events.size)
+        // Wall time can advance between injected callbacks; the event must still be eight seconds old.
+        assertTrue(events.single() in (receiptWallMs - 8_000L)..(System.currentTimeMillis() - 8_000L))
         monitor.stop()
     }
 

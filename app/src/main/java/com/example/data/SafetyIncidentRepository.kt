@@ -79,7 +79,8 @@ class SafetyIncidentRepository(private val db: AppDatabase) {
             val current = dao.getRecipient(eventId) ?: return@withTransaction
             if (attemptCount < current.attemptCount) return@withTransaction
             if (attemptCount == current.attemptCount) {
-                if (updatedAtMs < current.updatedAtMs) return@withTransaction
+                val confirmedCallback = dispatchState == "SENT" || dispatchState == "DELIVERED"
+                if (updatedAtMs < current.updatedAtMs && !confirmedCallback) return@withTransaction
                 // Foreground and broadcast coroutines may persist snapshots out of
                 // order, including within the same millisecond.
                 if (current.dispatchState == "DELIVERED" && dispatchState != "DELIVERED") {

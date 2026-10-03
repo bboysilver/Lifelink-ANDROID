@@ -1,6 +1,9 @@
 package com.example.monitoring
 
 import android.app.Application
+import android.app.Activity
+import android.app.Notification
+import android.app.NotificationManager
 import android.content.Context
 import androidx.test.core.app.ApplicationProvider
 import androidx.work.ListenableWorker
@@ -22,6 +25,7 @@ import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
+import org.robolectric.annotation.Config
 import java.util.concurrent.TimeUnit
 
 @RunWith(RobolectricTestRunner::class)
@@ -86,7 +90,7 @@ class SafetySmsRetryWorkerTest {
     fun failedDailySmsDoesNotRetryAfterAutomaticActivityConfirmation() = runBlocking {
         val store = MonitoringStore(context)
         val due = store.configureDailyCheckIn(18, 1_700_000_000_000L)
-        store.beginStart(due - 60_000L)
+        store.beginStart(due - 60_000L, elapsedRealtimeMs = due - 60_000L)
         store.markDailyCheckInPrompted(due, due)
         val event = "daily:$due:1"
         val incidents = SafetyIncidentRepository(AppDatabase.getDatabase(context))
@@ -96,7 +100,8 @@ class SafetySmsRetryWorkerTest {
         val dispatch = SmsDispatchStore(context)
         val attempt = dispatch.beginAttempt(event, 1, nowMs = failedAt)!!
         dispatch.markQueueFailure(event, attempt, android.telephony.SmsManager.RESULT_ERROR_NO_SERVICE, failedAt)
-        store.recordActivity(failedAt + 1_000L, "unlock", failedAt + 1_000L)
+        store.recordActivity(failedAt + 1_000L, "unlock", failedAt + 1_000L,
+            elapsedRealtimeMs = failedAt + 1_000L)
 
         assertNull(SafetySmsRetryTask(context).run(event, failedAt + 5 * 60_000L))
         assertEquals(1, dispatch.status(event).attempt)
@@ -106,17 +111,84 @@ class SafetySmsRetryWorkerTest {
     @Test
     fun recoveryDoesNotStartAnUnsentInactivityAlertAfterNewActivity() = runBlocking {
         val store = MonitoringStore(context)
-        store.beginStart(1_000L)
+        store.beginStart(1_000L, elapsedRealtimeMs = 1_000L)
         val deadline = store.deadlineMs
         val incidents = SafetyIncidentRepository(AppDatabase.getDatabase(context))
         incidents.getOrCreate(
             "emergency:$deadline", "emergency", deadline, "test", "test", null, 1,
             listOf(Contact(id = 1, name = "guardian", phoneNumber = "01012345678"))
         )
-        store.recordActivity(deadline + 1_000L, "unlock", deadline + 1_000L)
+        store.recordActivity(deadline + 1_000L, "unlock", deadline + 1_000L,
+            elapsedRealtimeMs = deadline + 1_000L)
 
         assertNull(SafetySmsRetryTask(context).run("emergency:$deadline:1", deadline + 2_000L))
         assertEquals(0, SmsDispatchStore(context).status("emergency:$deadline:1").attempt)
         assertTrue(incidents.get("emergency:$deadline")!!.incident.completedAtMs != null)
+    }
+
+    @Test
+    @Config(sdk = [28])
+    fun recoveryPostsSuccessWithoutAForegroundService() = runBlocking {
+        val incidents = SafetyIncidentRepository(AppDatabase.getDatabase(context))
+        incidents.getOrCreate("sos:1000", "sos", 1_000L, "test", "test", null, 1,
+            listOf(Contact(id = 1, name = "guardian", phoneNumber = "01012345678")))
+        val eventId = "sos:1000:1"
+        val dispatch = SmsDispatchStore(context)
+        val attempt = dispatch.beginAttempt(eventId, 1, nowMs = 1_001L)!!
+        dispatch.recordCallback(SmsCallbackStage.SENT, eventId, attempt, 0, 1, Activity.RESULT_OK, 2_000L)
+
+        assertNull(SafetySmsRetryTask(context).run(eventId, 2_001L))
+
+        val notification = context.getSystemService(NotificationManager::class.java)
+            .activeNotifications.single { it.id == SafetySmsStatusNotifier.NOTIFICATION_ID }.notification
+        assertEquals("SOS 문자 발송 확인", notification.extras.getString(Notification.EXTRA_TITLE))
+        assertTrue(incidents.get("sos:1000")!!.incident.completedAtMs != null)
+        assertEquals("", incidents.get("sos:1000")!!.recipients.single().phoneNumber)
+    }
+
+    @Test
+    @Config(sdk = [28])
+    fun recoveryPostsFinalFailureWithoutAForegroundService() = runBlocking {
+        val incidents = SafetyIncidentRepository(AppDatabase.getDatabase(context))
+        incidents.getOrCreate("sos:1000", "sos", 1_000L, "test", "test", null, 1,
+            listOf(Contact(id = 1, name = "guardian", phoneNumber = "01012345678")))
+        val eventId = "sos:1000:1"
+        val dispatch = SmsDispatchStore(context)
+        var nowMs = 2_000L
+        repeat(SmsDispatchStore.MAX_ATTEMPTS) {
+            val attempt = dispatch.beginAttempt(eventId, 1, nowMs = nowMs)!!
+            dispatch.markQueueFailure(eventId, attempt, android.telephony.SmsManager.RESULT_ERROR_NO_SERVICE, nowMs)
+            nowMs += SmsDispatchStore.RETRY_DELAY_MS
+        }
+
+        assertNull(SafetySmsRetryTask(context).run(eventId, nowMs))
+
+        val notification = context.getSystemService(NotificationManager::class.java)
+            .activeNotifications.single { it.id == SafetySmsStatusNotifier.NOTIFICATION_ID }.notification
+        assertEquals("SOS 문자 발송 확인 필요", notification.extras.getString(Notification.EXTRA_TITLE))
+        assertTrue(notification.extras.getString(Notification.EXTRA_TEXT)!!.contains("모두"))
+        assertTrue(incidents.get("sos:1000")!!.incident.completedAtMs != null)
+        assertEquals(SmsDispatchState.FAILED_FINAL, dispatch.status(eventId).state)
+    }
+
+    @Test
+    fun clockRebaseDoesNotCancelAnUnsentIncidentForTheSameActivityCycle() = runBlocking {
+        val store = MonitoringStore(context)
+        store.beginStart(1_000L, elapsedRealtimeMs = 1_000L)
+        val eventMs = store.inactivityEventMs
+        val incidents = SafetyIncidentRepository(AppDatabase.getDatabase(context))
+        incidents.getOrCreate(
+            "emergency:$eventMs", "emergency", eventMs, "test", "test", null, 1,
+            listOf(Contact(id = 1, name = "guardian", phoneNumber = "01012345678"))
+        )
+        store.rebaseAfterWallClockChange(3_601_000L, elapsedRealtimeMs = 1_000L)
+
+        // With SEND_SMS unavailable, the same incident remains pending for recovery.
+        val nextRun = SafetySmsRetryTask(context).run("emergency:$eventMs:1", 3_601_000L)
+
+        assertEquals(eventMs, store.inactivityEventMs)
+        assertTrue(store.deadlineMs != eventMs)
+        assertTrue(nextRun != null)
+        assertNull(incidents.get("emergency:$eventMs")!!.incident.completedAtMs)
     }
 }

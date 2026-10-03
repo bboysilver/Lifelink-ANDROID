@@ -42,7 +42,7 @@ class InactivityDeadlineTest {
         }
         store = MonitoringStore(context)
         store.completeSetup()
-        store.beginStart(nowMs = now)
+        store.beginStart(nowMs = now, elapsedRealtimeMs = 0L)
         db = Room.inMemoryDatabaseBuilder(context, AppDatabase::class.java).build()
         incidents = SafetyIncidentRepository(db)
         task = InactivityDeadlineTask(context, store, LifeLinkRepository(db), incidents)
@@ -58,8 +58,8 @@ class InactivityDeadlineTest {
         val alarms = shadowOf(context.getSystemService(AlarmManager::class.java))
         val warningAt = store.deadlineMs - DeadlineCalculator.PRE_ALERT_SECONDS * 1_000L
         assertEquals(warningAt, alarms.scheduledAlarms.single().triggerAtTime)
-        task.run(store.deadlineMs, warningAt)
-        task.run(store.deadlineMs, warningAt + 1_000L)
+        task.run(store.deadlineMs, warningAt, warningAt - now)
+        task.run(store.deadlineMs, warningAt + 1_000L, warningAt + 1_000L - now)
         assertTrue(store.wasPreAlerted(store.deadlineMs))
         assertEquals(store.deadlineMs, alarms.scheduledAlarms.single().triggerAtTime)
     }
@@ -69,7 +69,7 @@ class InactivityDeadlineTest {
         val deadline = store.deadlineMs
         InactivityDeadlineScheduler(context).ensureScheduled(now)
         store.stop(now + 1_000L)
-        task.run(deadline, deadline + 1_000L)
+        task.run(deadline, deadline + 1_000L, deadline + 1_000L - now)
         assertTrue(shadowOf(context.getSystemService(AlarmManager::class.java)).scheduledAlarms.isEmpty())
         assertNull(incidents.get("emergency:$deadline"))
     }
@@ -77,8 +77,8 @@ class InactivityDeadlineTest {
     @Test
     fun resetMakesAnOldAlarmHarmless() = runBlocking {
         val old = store.deadlineMs
-        store.resetDeadline(now + 60_000L, "safe")
-        task.run(old, old + 1_000L)
+        store.resetDeadline(now + 60_000L, "safe", elapsedRealtimeMs = 60_000L)
+        task.run(old, old + 1_000L, old + 1_000L - now)
         assertFalse(store.wasPreAlerted(store.deadlineMs))
         assertNull(incidents.get("emergency:$old"))
     }
@@ -95,7 +95,7 @@ class InactivityDeadlineTest {
         val dispatch = SmsDispatchStore(context)
         val attempt = dispatch.beginAttempt(eventId, 1)!!
         dispatch.recordCallback(SmsCallbackStage.SENT, eventId, attempt, 0, 1, Activity.RESULT_OK)
-        task.run(deadline, deadline)
+        task.run(deadline, deadline, deadline - now)
         assertTrue(store.wasEmergencyDispatched(deadline))
         assertEquals(1, dispatch.status(eventId).attempt)
         assertNotNull(incidents.get("emergency:$deadline")!!.incident.completedAtMs)
@@ -103,6 +103,7 @@ class InactivityDeadlineTest {
 
     @Test
     fun safeActionWorksWithoutStartingAForegroundService() {
+        store.beginStart()
         val deadline = store.deadlineMs
         InactivityDeadlineReceiver().onReceive(context,
             Intent(InactivityDeadlineReceiver.ACTION_SAFE)

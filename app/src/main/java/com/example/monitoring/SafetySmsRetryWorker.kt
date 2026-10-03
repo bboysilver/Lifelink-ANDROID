@@ -146,7 +146,7 @@ internal class SafetySmsRetryTask(
         val sender = EmergencySmsSender(appContext)
 
         val superseded = when (event.type) {
-            SafetySmsEventType.EMERGENCY -> !store.desiredEnabled || store.deadlineMs != event.occurredAtMs
+            SafetySmsEventType.EMERGENCY -> !store.desiredEnabled || store.inactivityEventMs != event.occurredAtMs
             SafetySmsEventType.DAILY -> !store.dailyCheckInEnabled || store.dailyNextDueAtMs != event.occurredAtMs
             SafetySmsEventType.SOS -> false
         }
@@ -207,6 +207,7 @@ internal class SafetySmsRetryTask(
         nowMs: Long
     ) {
         val snapshot = incidents.get(event.incidentId) ?: originalSnapshot
+        if (snapshot.incident.completedAtMs != null) return
         val sender = EmergencySmsSender(appContext)
         val statuses = snapshot.recipients.map { recipient ->
             sender.status(recipient.eventId, nowMs).also { status ->
@@ -214,6 +215,10 @@ internal class SafetySmsRetryTask(
             }
         }
         if (statuses.isEmpty() || statuses.any { !it.isResolved }) return
+
+        if (event.type != SafetySmsEventType.DAILY || store.dailyNextDueAtMs == event.occurredAtMs) {
+            SafetySmsStatusNotifier.showCompletion(appContext, event.type, statuses)
+        }
 
         when (event.type) {
             SafetySmsEventType.EMERGENCY -> store.markEmergency(event.occurredAtMs)

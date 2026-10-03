@@ -159,7 +159,8 @@ class SafetyIncidentRepositoryTest {
         assertEquals(2, repository.recipient(eventId)?.attemptCount)
 
         repository.updateRecipientStatus(eventId, 2, "FAILED_FINAL", 4_000L)
-        repository.updateRecipientStatus(eventId, 2, "SENT", 5_000L)
+        // A valid callback still advances after the user rolls the wall clock back.
+        repository.updateRecipientStatus(eventId, 2, "SENT", 2_000L)
         assertEquals("SENT", repository.recipient(eventId)?.dispatchState)
     }
 }

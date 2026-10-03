@@ -4,6 +4,7 @@ import android.app.AlarmManager
 import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
+import android.os.SystemClock
 import com.example.data.MonitoringStore
 
 class DailyCheckInScheduler(context: Context) {
@@ -11,17 +12,17 @@ class DailyCheckInScheduler(context: Context) {
     private val alarmManager = appContext.getSystemService(AlarmManager::class.java)
     private val store = MonitoringStore(appContext)
 
-    fun ensureScheduled(nowMs: Long = System.currentTimeMillis()) {
+    fun ensureScheduled(nowMs: Long = System.currentTimeMillis(), elapsedRealtimeMs: Long = SystemClock.elapsedRealtime()) {
         cancel()
         if (!store.dailyCheckInEnabled) return
 
         store.ensureDailyCheckInScheduled(nowMs)
-        var status = store.dailyCheckInStatus(nowMs)
+        var status = store.dailyCheckInStatus(nowMs, elapsedRealtimeMs)
         if (status.phase == com.example.data.DailyCheckInPhase.OVERDUE &&
             !store.wasDailyCheckInPrompted(status.dueAtMs)
         ) {
             store.deferDailyCheckInToNow(nowMs)
-            status = store.dailyCheckInStatus(nowMs)
+            status = store.dailyCheckInStatus(nowMs, elapsedRealtimeMs)
         }
         if (status.dueAtMs <= 0L) return
 

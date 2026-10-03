@@ -11,6 +11,7 @@ import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import com.example.data.AppDatabase
 import com.example.data.Contact
+import com.example.data.ContactInsertResult
 import com.example.data.DailyCheckInPhase
 import com.example.data.EventLog
 import com.example.data.LifeLinkRepository
@@ -232,6 +233,10 @@ class LifeLinkViewModel(application: Application) : AndroidViewModel(application
     }
 
     fun updateDailyCheckIn(hour: Int?) {
+        if (hour != null && contacts.value.isEmpty()) {
+            logValidationError("매일 안부 확인을 사용하려면 보호자 연락처를 먼저 등록해 주세요.")
+            return
+        }
         if (hour != null && !SafetyNotificationCapability.canPost(context)) {
             val message = "알림 권한과 안전 확인 알림 채널을 켠 뒤 매일 안부 확인을 설정해 주세요."
             monitoringStore.dailyCheckInError = message
@@ -404,7 +409,11 @@ class LifeLinkViewModel(application: Application) : AndroidViewModel(application
             normalizedPhone.length !in 8..15 -> logValidationError("올바른 보호자 전화번호를 입력해 주세요.")
             contacts.value.size >= 3 -> logValidationError("긴급 연락처는 최대 3명까지 등록할 수 있습니다.")
             else -> viewModelScope.launch {
-                repository.insertContact(Contact(name = name.trim(), phoneNumber = normalizedPhone))
+                when (repository.insertContact(Contact(name = name.trim(), phoneNumber = normalizedPhone))) {
+                    ContactInsertResult.ADDED -> Unit
+                    ContactInsertResult.DUPLICATE -> logValidationError("이미 등록된 전화번호입니다. 같은 보호자는 한 번만 등록해 주세요.")
+                    ContactInsertResult.LIMIT_REACHED -> logValidationError("긴급 연락처는 최대 3명까지 등록할 수 있습니다.")
+                }
             }
         }
     }
@@ -463,11 +472,22 @@ class LifeLinkViewModel(application: Application) : AndroidViewModel(application
         }
     }
     fun deleteContact(contact: Contact) {
-        if (monitoringStore.testSmsVerification.contactId == contact.id) {
-            monitoringStore.invalidateTestSmsVerification()
+        viewModelScope.launch {
+            if (monitoringStore.desiredEnabled && monitoringStore.testSmsVerification.contactId == contact.id) {
+                logValidationError("시험 문자로 확인한 보호자입니다. 모니터링을 중지한 뒤 삭제하고, 새 보호자에게 시험 문자를 보내 주세요.")
+                return@launch
+            }
+            val requireRemaining = monitoringStore.desiredEnabled ||
+                monitoringStore.dailyCheckInEnabled || monitoringStore.sosEventMs > 0L
+            if (!repository.deleteContact(contact, requireRemaining)) {
+                logValidationError("안전 기능을 사용하는 동안 보호자 1명은 필요합니다. 다른 보호자를 먼저 등록하거나 안전 기능을 중지해 주세요.")
+                return@launch
+            }
+            if (monitoringStore.testSmsVerification.contactId == contact.id) {
+                monitoringStore.invalidateTestSmsVerification()
+            }
+            refreshUi()
         }
-        viewModelScope.launch { repository.deleteContact(contact) }
-        refreshUi()
     }
 
     fun clearAllLogs() {

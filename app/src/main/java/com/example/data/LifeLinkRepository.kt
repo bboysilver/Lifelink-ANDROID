@@ -27,13 +27,19 @@ class LifeLinkRepository(private val db: AppDatabase) {
 
     // Contacts
     suspend fun insertContact(contact: Contact) = withContext(Dispatchers.IO) {
-        db.contactDao().insertContact(contact)
-        insertLog("SAFETY_INIT", "보호자 긴급 연락처를 등록했습니다", "${contact.name} (${maskPhone(contact.phoneNumber)})")
+        val result = db.contactDao().insertContactIfAllowed(contact)
+        if (result == ContactInsertResult.ADDED) {
+            insertLog("SAFETY_INIT", "보호자 긴급 연락처를 등록했습니다", "${contact.name} (${maskPhone(contact.phoneNumber)})")
+        }
+        result
     }
 
-    suspend fun deleteContact(contact: Contact) = withContext(Dispatchers.IO) {
-        db.contactDao().deleteContact(contact)
-        insertLog("SAFETY_INIT", "보호자 연락처를 삭제했습니다", "${contact.name} (${maskPhone(contact.phoneNumber)})")
+    suspend fun deleteContact(contact: Contact, requireRemainingContact: Boolean) = withContext(Dispatchers.IO) {
+        val deleted = db.contactDao().deleteContactIfAllowed(contact, requireRemainingContact)
+        if (deleted) {
+            insertLog("SAFETY_INIT", "보호자 연락처를 삭제했습니다", "${contact.name} (${maskPhone(contact.phoneNumber)})")
+        }
+        deleted
     }
 
     suspend fun getContactCount(): Int = withContext(Dispatchers.IO) {

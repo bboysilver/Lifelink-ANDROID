@@ -10,6 +10,8 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.Robolectric
 import org.robolectric.RobolectricTestRunner
+import org.robolectric.shadows.ShadowSystemClock
+import java.time.Duration
 
 @RunWith(RobolectricTestRunner::class)
 class MainActivityInteractionTest {
@@ -18,8 +20,9 @@ class MainActivityInteractionTest {
         val context = ApplicationProvider.getApplicationContext<Application>()
         context.getSharedPreferences("lifelink_monitoring", Context.MODE_PRIVATE).edit().clear().commit()
         val store = MonitoringStore(context)
-        store.beginStart(System.currentTimeMillis() - 11 * 60 * 60 * 1_000L)
+        store.beginStart()
         val previousDeadline = store.deadlineMs
+        ShadowSystemClock.advanceBy(Duration.ofHours(11))
 
         Robolectric.buildActivity(MainActivity::class.java).get().onUserInteraction()
 

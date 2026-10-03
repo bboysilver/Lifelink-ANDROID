@@ -17,11 +17,13 @@ class MaintenanceWorker(
 ) : CoroutineWorker(appContext, params) {
     override suspend fun doWork(): Result = try {
         val nowMs = System.currentTimeMillis()
-        SmsDispatchStore(applicationContext).pruneExpired(nowMs)
         val database = AppDatabase.getDatabase(applicationContext)
+        val incidents = SafetyIncidentRepository(database)
+        SmsDispatchStore(applicationContext).pruneExpired(
+            nowMs, preserveEventIds = incidents.pendingRecipients().map { it.eventId }.toSet()
+        )
         LifeLinkRepository(database).deleteLogsBefore(nowMs - SmsDispatchStore.RETENTION_MS)
-        SafetyIncidentRepository(database)
-            .deleteCompletedBefore(nowMs - SmsDispatchStore.RETENTION_MS)
+        incidents.deleteCompletedBefore(nowMs - SmsDispatchStore.RETENTION_MS)
         SafetySmsRetryWorker.enqueueRecovery(applicationContext)
         if (com.example.data.MonitoringStore(applicationContext).desiredEnabled) {
             MonitoringWatchdogWorker.ensureScheduled(applicationContext)

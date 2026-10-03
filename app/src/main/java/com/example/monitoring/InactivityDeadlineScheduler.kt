@@ -17,7 +17,7 @@ class InactivityDeadlineScheduler(context: Context) {
     fun ensureScheduled(nowMs: Long = System.currentTimeMillis()) = synchronized(LOCK) {
         val deadline = store.deadlineMs
         if (!store.desiredEnabled || !store.isSetupCurrent || deadline <= 0L ||
-            store.wasEmergencyDispatched(deadline)
+            store.wasEmergencyDispatched(store.inactivityEventMs)
         ) {
             cancel()
             return@synchronized

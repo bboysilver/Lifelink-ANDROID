@@ -57,12 +57,12 @@ class DailyCheckInTaskTest {
     @Test
     fun automaticActivityBeforeLateMorningWorkerPreventsDailySms() = runBlocking {
         val due = store.configureDailyCheckIn(18, 1_700_000_000_000L)
-        store.beginStart(due - 60_000L)
-        store.markDailyCheckInPrompted(due, due)
-        store.recordActivity(due + 60_000L, "unlock", due + 60_000L)
+        store.beginStart(due - 60_000L, elapsedRealtimeMs = 0L)
+        store.markDailyCheckInPrompted(due, due, elapsedRealtimeMs = 60_000L)
+        store.recordActivity(due + 60_000L, "unlock", due + 60_000L, elapsedRealtimeMs = 120_000L)
 
         val result = DailyCheckInTask(context, store, repository)
-            .run(due + 13 * 60 * 60 * 1_000L)
+            .run(due + 13 * 60 * 60 * 1_000L, elapsedRealtimeMs = 60_000L + 13 * 60 * 60 * 1_000L)
 
         assertEquals(null, result.nextRunAtMs)
         assertEquals("", store.dailyCheckInError)
@@ -74,7 +74,7 @@ class DailyCheckInTaskTest {
         val dueAtMs = store.configureDailyCheckIn(hour = 18, nowMs = 1_700_000_000_000L)
         val displayedAtMs = dueAtMs + 60 * 60 * 1_000L
 
-        DailyCheckInTask(context, store, repository).run(displayedAtMs)
+        DailyCheckInTask(context, store, repository).run(displayedAtMs, elapsedRealtimeMs = 0L)
 
         assertEquals(
             displayedAtMs + DailyCheckInCalculator.RESPONSE_WINDOW_MS,
@@ -82,7 +82,7 @@ class DailyCheckInTaskTest {
         )
         assertEquals(
             DailyCheckInPhase.DUE,
-            store.dailyCheckInStatus(dueAtMs + DailyCheckInCalculator.RESPONSE_WINDOW_MS).phase
+            store.dailyCheckInStatus(dueAtMs + DailyCheckInCalculator.RESPONSE_WINDOW_MS, 60 * 60 * 1_000L).phase
         )
     }
 
@@ -114,10 +114,10 @@ class DailyCheckInTaskTest {
     @Test
     fun noContactsKeepsTheMissedCheckInPendingForRetry() = runBlocking {
         val dueAtMs = store.configureDailyCheckIn(hour = 18, nowMs = 1_700_000_000_000L)
-        store.markDailyCheckInPrompted(dueAtMs, dueAtMs)
+        store.markDailyCheckInPrompted(dueAtMs, dueAtMs, 0L)
         val overdueAtMs = dueAtMs + DailyCheckInCalculator.RESPONSE_WINDOW_MS
 
-        val result = DailyCheckInTask(context, store, repository).run(overdueAtMs)
+        val result = DailyCheckInTask(context, store, repository).run(overdueAtMs, elapsedRealtimeMs = DailyCheckInCalculator.RESPONSE_WINDOW_MS)
 
         assertTrue(store.dailyCheckInError.contains("긴급 연락처"))
         assertTrue(result.nextRunAtMs != null && result.nextRunAtMs!! > overdueAtMs)
@@ -128,10 +128,10 @@ class DailyCheckInTaskTest {
     fun revokedSmsPermissionKeepsTheMissedCheckInPendingForRetry() = runBlocking {
         database.contactDao().insertContact(Contact(id = 1, name = "보호자", phoneNumber = "01012345678"))
         val dueAtMs = store.configureDailyCheckIn(hour = 18, nowMs = 1_700_000_000_000L)
-        store.markDailyCheckInPrompted(dueAtMs, dueAtMs)
+        store.markDailyCheckInPrompted(dueAtMs, dueAtMs, 0L)
         val overdueAtMs = dueAtMs + DailyCheckInCalculator.RESPONSE_WINDOW_MS
 
-        val result = DailyCheckInTask(context, store, repository).run(overdueAtMs)
+        val result = DailyCheckInTask(context, store, repository).run(overdueAtMs, elapsedRealtimeMs = DailyCheckInCalculator.RESPONSE_WINDOW_MS)
 
         assertTrue(store.dailyCheckInError.contains("문자 권한"))
         assertTrue(result.nextRunAtMs != null)

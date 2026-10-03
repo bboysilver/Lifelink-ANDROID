@@ -12,6 +12,7 @@ import android.content.pm.PackageManager
 import android.content.pm.ServiceInfo
 import android.os.Build
 import android.os.IBinder
+import android.os.SystemClock
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import androidx.core.app.ServiceCompat
@@ -41,9 +42,8 @@ class MonitoringService : Service() {
     private lateinit var sensorMonitor: SensorMonitor
     private lateinit var smsSubscriptionMonitor: SmsSubscriptionMonitor
     private var monitorJob: Job? = null
-    private var lastBlockingAlertMs = 0L
     private var lastMaintenanceMs = 0L
-    private var lastHeartbeatWriteMs = 0L
+    private var lastHeartbeatWriteElapsedMs = 0L
     private var lastOngoingNotificationMinute = Long.MIN_VALUE
     private var startupFailed = false
 
@@ -54,11 +54,10 @@ class MonitoringService : Service() {
         repository = LifeLinkRepository(database)
         incidents = SafetyIncidentRepository(database)
         SafetySmsRetryWorker.enqueueRecovery(this)
-        SmsDispatchStore(this).pruneExpired()
         DailyCheckInScheduler(this).ensureScheduled()
 
         val dailyStatus = store.dailyCheckInStatus()
-        if (!store.desiredEnabled && store.sosEventMs <= 0L && !dailyStatus.needsResponse) {
+        if (!store.desiredEnabled && !dailyStatus.needsResponse) {
             stopSelf()
             return
         }
@@ -71,7 +70,6 @@ class MonitoringService : Service() {
         }
 
         val requiresSms = store.desiredEnabled ||
-            store.sosEventMs > 0L ||
             dailyStatus.phase == DailyCheckInPhase.OVERDUE
         if (requiresSms) {
             val smsSetup = SmsDeviceManager(this, store).inspect()
@@ -87,7 +85,7 @@ class MonitoringService : Service() {
         if (store.desiredEnabled) {
             val nowMs = System.currentTimeMillis()
             store.markServiceRunning(nowMs)
-            lastHeartbeatWriteMs = nowMs
+            lastHeartbeatWriteElapsedMs = SystemClock.elapsedRealtime()
             MonitoringWatchdogWorker.ensureScheduled(this)
             MonitoringStatusNotifier.cancel(this)
         }
@@ -98,7 +96,7 @@ class MonitoringService : Service() {
             stopSelf()
             return START_NOT_STICKY
         }
-        // A service initially created for SOS can later be reused for monitoring.
+        // A service initially created for daily check-in can later be reused for monitoring.
         // Do not report RUNNING without registering its activity listeners.
         if (!ensureActivitySensors()) return START_NOT_STICKY
         if (!ensureSmsSubscriptionMonitor()) return START_NOT_STICKY
@@ -115,7 +113,7 @@ class MonitoringService : Service() {
                 if (store.desiredEnabled) {
                     val nowMs = System.currentTimeMillis()
                     store.markServiceRunning(nowMs)
-                    lastHeartbeatWriteMs = nowMs
+                    lastHeartbeatWriteElapsedMs = SystemClock.elapsedRealtime()
                     MonitoringWatchdogWorker.ensureScheduled(this)
                     MonitoringStatusNotifier.cancel(this)
                 }
@@ -123,12 +121,12 @@ class MonitoringService : Service() {
         }
 
         val dailyNeedsWork = store.dailyCheckInStatus().needsResponse
-        if (!store.desiredEnabled && store.sosEventMs <= 0L && !dailyNeedsWork) {
+        if (!store.desiredEnabled && !dailyNeedsWork) {
             stopSelf()
             return START_NOT_STICKY
         }
         startMonitorLoop()
-        return if (store.desiredEnabled || store.sosEventMs > 0L || hasPendingDailyDispatch()) {
+        return if (store.desiredEnabled || hasPendingDailyDispatch()) {
             START_STICKY
         } else {
             START_NOT_STICKY
@@ -167,7 +165,6 @@ class MonitoringService : Service() {
                     repository.insertLog("SYSTEM_ERROR", "SIM 변경으로 안전 기능을 중단했습니다.", message)
                 }
                 showAlertNotification("SIM 상태 확인 필요", message)
-                if (!store.desiredEnabled && store.sosEventMs > 0L) store.clearSos()
                 stopSelf()
             }
         }
@@ -196,7 +193,6 @@ class MonitoringService : Service() {
         startupFailed = true
         store.markServiceError(message)
         if (store.dailyCheckInStatus().needsResponse) store.dailyCheckInError = message
-        if (!store.desiredEnabled && store.sosEventMs > 0L) store.clearSos()
         serviceScope.launch { repository.insertLog("SYSTEM_ERROR", message) }
         showAlertNotification("안전 기능 시작 실패", message)
         stopSelf()
@@ -204,7 +200,6 @@ class MonitoringService : Service() {
 
     private fun requiresSmsMonitoring(): Boolean =
         store.desiredEnabled ||
-            store.sosEventMs > 0L ||
             store.dailyCheckInStatus().phase == DailyCheckInPhase.OVERDUE
     private fun startMonitorLoop() {
         if (monitorJob?.isActive == true) return
@@ -218,7 +213,6 @@ class MonitoringService : Service() {
                 (
                     firstPass ||
                         store.desiredEnabled ||
-                        store.sosEventMs > 0L ||
                         hasPendingDailyDispatch()
                     )
             ) {
@@ -226,24 +220,28 @@ class MonitoringService : Service() {
                 runMaintenanceIfNeeded()
                 if (store.desiredEnabled) {
                     val nowMs = System.currentTimeMillis()
-                    if (MonitoringUpdatePolicy.shouldWriteHeartbeat(lastHeartbeatWriteMs, nowMs)) {
-                        runtimeCapabilityIssue()?.let { message ->
+                    val elapsedMs = SystemClock.elapsedRealtime()
+                    if (MonitoringUpdatePolicy.shouldWriteHeartbeat(lastHeartbeatWriteElapsedMs, elapsedMs)) {
+                        val issue = runtimeCapabilityIssue() ?: if (repository.getContactCount() == 0) {
+                            "보호자 연락처가 없어 모니터링을 계속할 수 없습니다."
+                        } else null
+                        issue?.let { message ->
                             failRuntime(message)
                             return@launch
                         }
-                        store.markHeartbeat(nowMs)
-                        lastHeartbeatWriteMs = nowMs
+                        if (store.markHeartbeat(nowMs, elapsedMs)) {
+                            InactivityDeadlineScheduler(this@MonitoringService).ensureScheduled(nowMs)
+                        }
+                        lastHeartbeatWriteElapsedMs = elapsedMs
                     }
                     evaluateInactivityDeadline()
                 }
                 evaluateDailyCheckIn()
-                dispatchPendingSos()
 
                 val shouldContinue = store.desiredEnabled ||
-                    store.sosEventMs > 0L ||
                     hasPendingDailyDispatch()
                 if (!shouldContinue) break
-                delay(if (store.sosEventMs > 0L) SOS_CHECK_INTERVAL_MS else CHECK_INTERVAL_MS)
+                delay(CHECK_INTERVAL_MS)
             }
             if (!store.desiredEnabled) stopSelf()
         }
@@ -264,53 +262,6 @@ class MonitoringService : Service() {
         val result = DailyCheckInTask(this, store, repository).run()
         result.nextRunAtMs?.let { DailyCheckInWorker.enqueueAt(this, result.dueAtMs, it) }
     }
-    private suspend fun dispatchPendingSos() {
-        val eventMs = store.claimPendingSos() ?: store.activeSosEventMs
-        if (eventMs <= 0L) return
-        val batch = queueSafetyMessage(
-            type = SafetySmsEventType.SOS,
-            occurredAtMs = eventMs,
-            message = EmergencyMessageBuilder.buildSos(store.deviceAlias, eventMs),
-            batteryPercent = null
-        ) ?: return
-        if (batch.statuses.all { it.isResolved }) {
-            store.completeActiveSos(eventMs)
-            showCompletionNotification("SOS 문자", batch.statuses)
-        } else if (batch.queuedAny) {
-            showRetryNotification("SOS 문자 발송 확인 중")
-        }
-    }
-
-    private suspend fun queueSafetyMessage(
-        type: SafetySmsEventType,
-        occurredAtMs: Long,
-        message: String,
-        batteryPercent: Int?
-    ): SafetySmsBatch? = SafetyMessageDispatcher(
-        this, store, repository, incidents, ::reportBlockingDispatchProblem
-    ).queue(type, occurredAtMs, message, batteryPercent)
-
-    private fun showCompletionNotification(label: String, statuses: List<SmsDispatchStatus>) {
-        val failedCount = statuses.count { it.state == SmsDispatchState.FAILED_FINAL }
-        if (failedCount == 0) {
-            showAlertNotification("$label 발송 확인", "모든 보호자 문자 발송이 확인되었습니다.")
-        } else {
-            showAlertNotification("$label 일부 실패", "${failedCount}명의 보호자에게 3회 시도했지만 발송하지 못했습니다.")
-        }
-    }
-
-    private fun showRetryNotification(title: String) {
-        showAlertNotification(title, "통신사 결과를 확인하며 실패 시 최대 3회 다시 시도합니다.")
-    }
-
-    private suspend fun reportBlockingDispatchProblem(logMessage: String, title: String, body: String) {
-        val nowMs = System.currentTimeMillis()
-        if (nowMs - lastBlockingAlertMs < BLOCKING_ALERT_INTERVAL_MS) return
-        lastBlockingAlertMs = nowMs
-        repository.insertLog("SMS_FAILED", logMessage)
-        showAlertNotification(title, body)
-    }
-
     private fun runtimeCapabilityIssue(): String? {
         if (!SafetyNotificationCapability.canPost(this)) {
             return "안전 알림이 꺼져 있어 모니터링을 계속할 수 없습니다."
@@ -369,7 +320,9 @@ class MonitoringService : Service() {
 
     private suspend fun runMaintenanceIfNeeded(nowMs: Long = System.currentTimeMillis()) {
         if (nowMs - lastMaintenanceMs < MAINTENANCE_INTERVAL_MS) return
-        SmsDispatchStore(this).pruneExpired(nowMs)
+        SmsDispatchStore(this).pruneExpired(
+            nowMs, preserveEventIds = incidents.pendingRecipients().map { it.eventId }.toSet()
+        )
         repository.deleteLogsBefore(nowMs - SmsDispatchStore.RETENTION_MS)
         lastMaintenanceMs = nowMs
     }
@@ -399,21 +352,16 @@ class MonitoringService : Service() {
         false
     }
     private fun buildOngoingNotification(remainingSeconds: Long): android.app.Notification {
-        val hasSos = store.sosEventMs > 0L
         val builder = NotificationCompat.Builder(this, MONITORING_CHANNEL_ID)
             .setSmallIcon(android.R.drawable.ic_dialog_info)
             .setContentTitle(
                 when {
-                    hasSos -> "SOS 문자 준비 중"
                     store.desiredEnabled -> "라이프링크 안심 모니터링 중"
                     else -> "매일 안부 확인 처리 중"
                 }
             )
             .setContentText(
                 when {
-                    hasSos && store.pendingSosEventMs > 0L ->
-                        "5초 안에 취소하지 않으면 보호자에게 문자를 보냅니다."
-                    hasSos -> "보호자 문자 발송 결과를 확인하고 있습니다."
                     store.desiredEnabled -> "다음 안전 확인까지 ${formatRemaining(remainingSeconds)}"
                     else -> "안부 확인 상태를 처리하고 있습니다."
                 }
@@ -423,15 +371,6 @@ class MonitoringService : Service() {
             .setOnlyAlertOnce(true)
             .setCategory(NotificationCompat.CATEGORY_SERVICE)
 
-        if (store.pendingSosEventMs > 0L) {
-            val cancelIntent = PendingIntent.getService(
-                this,
-                3,
-                Intent(this, MonitoringService::class.java).setAction(ACTION_CANCEL_SOS),
-                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-            )
-            builder.addAction(0, "SOS 취소", cancelIntent)
-        }
         return builder.build()
     }
     private fun updateOngoingNotification(remainingSeconds: Long) {
@@ -509,8 +448,6 @@ class MonitoringService : Service() {
         private const val ALERT_NOTIFICATION_ID = 1002
         private const val DAILY_NOTIFICATION_ID = 1003
         private const val CHECK_INTERVAL_MS = 15_000L
-        private const val SOS_CHECK_INTERVAL_MS = 1_000L
-        private const val BLOCKING_ALERT_INTERVAL_MS = 5 * 60 * 1_000L
         private const val MAINTENANCE_INTERVAL_MS = 24 * 60 * 60 * 1_000L
 
         fun start(context: Context) {
@@ -562,11 +499,7 @@ class MonitoringService : Service() {
             NotificationManagerCompat.from(context).cancel(DAILY_NOTIFICATION_ID)
         }
         fun triggerSos(context: Context) {
-            if (MonitoringStore(context).sosEventMs <= 0L) return
-            ContextCompat.startForegroundService(
-                context,
-                Intent(context, MonitoringService::class.java).setAction(ACTION_TRIGGER_SOS)
-            )
+            SosService.start(context)
         }
     }
 }

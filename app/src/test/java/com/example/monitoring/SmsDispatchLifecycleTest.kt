@@ -1,6 +1,7 @@
 package com.example.monitoring
 
 import android.content.Context
+import android.app.Activity
 import android.telephony.SmsManager
 import androidx.test.core.app.ApplicationProvider
 import org.junit.Assert.assertEquals
@@ -74,6 +75,41 @@ class SmsDispatchLifecycleTest {
 
         assertEquals(1, removed)
         assertEquals(SmsDispatchState.NOT_QUEUED, store.status(oldEvent).state)
+    }
+
+    @Test
+    fun retentionKeepsAllRecipientsOfAnUnfinishedIncidentIncludingSentOnes() {
+        val sentEvent = "sos:100:1"
+        val pendingEvent = "sos:100:2"
+        val expiredTest = "test:100:3"
+        val sentAttempt = store.beginAttempt(sentEvent, 1, nowMs = 1_000L)!!
+        store.recordCallback(SmsCallbackStage.SENT, sentEvent, sentAttempt, 0, 1, Activity.RESULT_OK, 2_000L)
+        store.beginAttempt(pendingEvent, 1, nowMs = 1_000L)
+        store.beginAttempt(expiredTest, 1, SmsRetryPolicy.ONE_SHOT, 1_000L)
+
+        val removed = store.pruneExpired(
+            nowMs = 2_000L + SmsDispatchStore.RETENTION_MS,
+            preserveEventIds = setOf(sentEvent, pendingEvent)
+        )
+
+        assertEquals(1, removed)
+        assertEquals(SmsDispatchState.SENT, store.status(sentEvent).state)
+        assertEquals(SmsDispatchState.QUEUED, store.status(pendingEvent).state)
+        assertEquals(SmsDispatchState.NOT_QUEUED, store.status(expiredTest).state)
+        assertEquals(1, store.status(sentEvent).attempt)
+        assertEquals(null, store.beginAttempt(sentEvent, 1, nowMs = 2_001L + SmsDispatchStore.RETENTION_MS))
+    }
+
+    @Test
+    fun retentionRemovesProtectedStatesAfterTheirIncidentCompletes() {
+        val event = "sos:100:1"
+        val attempt = store.beginAttempt(event, 1, nowMs = 1_000L)!!
+        store.recordCallback(SmsCallbackStage.SENT, event, attempt, 0, 1, Activity.RESULT_OK, 2_000L)
+        val expiredAt = 2_000L + SmsDispatchStore.RETENTION_MS
+        assertEquals(0, store.pruneExpired(expiredAt, preserveEventIds = setOf(event)))
+
+        assertEquals(1, store.pruneExpired(expiredAt))
+        assertEquals(SmsDispatchState.NOT_QUEUED, store.status(event).state)
     }
 
     @Test
