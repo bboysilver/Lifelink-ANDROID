@@ -25,10 +25,10 @@ android {
 
   defaultConfig {
     applicationId = "com.bboysilver.lifelink"
-    minSdk = 23
+    minSdk = 24
     targetSdk = 36
-    versionCode = 36
-    versionName = "2.2.15"
+    versionCode = 37
+    versionName = "2.2.16"
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
   }
 

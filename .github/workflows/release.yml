@@ -47,7 +47,7 @@ jobs:
           root = ET.parse(os.environ["MANIFEST"]).getroot()
           uses_sdk = root.find("uses-sdk")
           assert uses_sdk is not None
-          assert uses_sdk.get(android + "minSdkVersion") == "23"
+          assert uses_sdk.get(android + "minSdkVersion") == "24"
           features = {
               node.get(android + "name"): node.get(android + "required")
               for node in root.findall("uses-feature")

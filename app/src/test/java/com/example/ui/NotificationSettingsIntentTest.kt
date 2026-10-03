@@ -10,7 +10,7 @@ import org.robolectric.annotation.Config
 @RunWith(RobolectricTestRunner::class)
 class NotificationSettingsIntentTest {
     @Test
-    @Config(sdk = [23, 25])
+    @Config(sdk = [24, 25])
     fun olderDevicesUseSupportedAppDetailsScreen() {
         val intent = notificationSettingsIntent("com.bboysilver.lifelink")
         assertEquals(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, intent.action)

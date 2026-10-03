@@ -19,7 +19,7 @@ LifeLink는 일정 시간 동안 휴대전화 활동이 감지되지 않으면 �
 - 긴급 사건이 시작될 때 수신자·완성된 메시지·배터리·SIM을 고정 저장해 재시도 중 설정 변경의 영향을 받지 않습니다.
 - 기기 시각·날짜·시간대가 바뀌면 매일 안부 확인의 다음 현지 시각을 다시 예약합니다.
 - SMS 지원 여부와 활성 SIM을 확인하고, 멀티 SIM 단말에서는 사용자가 긴급 문자 회선을 직접 선택합니다.
-- Android 6(API 23) 이상의 이동통신사 SMS 지원 스마트폰 또는 SIM 지원 태블릿에서 사용할 수 있습니다. Wi-Fi 전용 기기는 핵심 안전 기능이 작동하지 않으므로 Play 배포 대상에서 제외합니다.
+- Android 7(API 24) 이상의 이동통신사 SMS 지원 스마트폰 또는 SIM 지원 태블릿에서 사용할 수 있습니다. Play 자동 보호 기능을 유지하기 위해 Android 6은 지원하지 않습니다. Wi-Fi 전용 기기는 핵심 안전 기능이 작동하지 않으므로 Play 배포 대상에서 제외합니다.
 - 초기 설정 후 각 보호자에게 1회 전용 테스트 문자를 보낼 수 있습니다. 테스트 문자는 자동 재시도하지 않으며 60초 쿨다운이 적용됩니다.
 - 시험 문자 콜백이 2분 동안 오지 않으면 확인 실패로 종료합니다. 늦게 도착한 성공 결과는 다음 발송 시도 전까지 반영합니다.
 - 홈 화면 SOS는 5초 취소 시간을 제공하고, 요청을 기기에 저장한 뒤 보호자 문자 결과를 추적·재시도합니다.
@@ -71,9 +71,9 @@ keyPassword=...
 
 Signed Android release 워크플로를 실행하려면 Actions secret에 ANDROID_UPLOAD_KEYSTORE_BASE64, ANDROID_UPLOAD_STORE_PASSWORD, ANDROID_UPLOAD_KEY_ALIAS, ANDROID_UPLOAD_KEY_PASSWORD를 등록하고 Repository Variable ANDROID_UPLOAD_CERT_SHA256에 업로드 인증서 지문을 설정합니다. 워크플로는 테스트와 lint를 실행하고 AAB 서명·인증서·SHA-256을 검증한 뒤 증빙 artifact로 보관합니다.
 
-릴리스 AAB는 `app/build/outputs/bundle/release/app-release.aab`에 생성됩니다. 앱 ID는 `com.bboysilver.lifelink`, 현재 버전은 `2.2.14 (35)`입니다. 기존 Play 앱에 올릴 때는 같은 업로드 인증서와 Play Console의 최신 versionCode보다 큰 번호를 사용해야 합니다.
+릴리스 AAB는 `app/build/outputs/bundle/release/app-release.aab`에 생성됩니다. 앱 ID는 `com.bboysilver.lifelink`, 현재 버전은 `2.2.16 (37)`입니다. 기존 Play 앱에 올릴 때는 같은 업로드 인증서와 Play Console의 최신 versionCode보다 큰 번호를 사용해야 합니다.
 
-최근 검토 결과와 정책·출시 조건은 [2026-09-15 검토](docs/review-2026-09-15.md)를 참고하세요.
+최근 검토 결과와 정책·출시 조건은 [2026-10-03 검토](docs/review-2026-10-03.md)를 참고하세요.
 
 ## 개인정보
 
