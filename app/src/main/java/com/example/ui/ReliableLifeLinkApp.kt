@@ -1,7 +1,6 @@
 package com.example.ui
 
 import android.Manifest
-import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.Uri
@@ -86,7 +85,6 @@ import com.example.data.EventLog
 import com.example.data.FamilyFollowUpStatus
 import com.example.data.SafetyReviewItem
 import com.example.data.MonitoringRuntimeState
-import com.example.monitoring.SafetyNotificationCapability
 import com.example.monitoring.SmsSetupIssue
 import com.example.monitoring.SmsSetupState
 import com.example.monitoring.userMessage
@@ -109,33 +107,33 @@ fun LifeLinkApp(viewModel: LifeLinkViewModel) {
     val sosCountdownSeconds by viewModel.sosCountdownSeconds.collectAsState()
     val userNotice by viewModel.userNotice.collectAsState()
     var selectedTab by remember { mutableStateOf(0) }
-    var permissionsReady by remember { mutableStateOf(hasCorePermissions(context)) }
+    var permissions by remember { mutableStateOf(SafetyPermissions.read(context)) }
+    val refreshPermissions: () -> Unit = {
+        val refreshed = SafetyPermissions.read(context)
+        permissions = refreshed
+        viewModel.refreshSmsSetup()
+        if (setupCompleted && refreshed.allGranted) viewModel.ensureMonitoringStarted()
+    }
 
     val smsPermissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission()
     ) {
-        permissionsReady = hasCorePermissions(context)
-        viewModel.refreshSmsSetup()
-        if (permissionsReady) viewModel.ensureMonitoringStarted()
+        refreshPermissions()
     }
     val phonePermissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission()
     ) {
-        permissionsReady = hasCorePermissions(context)
-        viewModel.refreshSmsSetup()
-        if (permissionsReady) viewModel.ensureMonitoringStarted()
+        refreshPermissions()
     }
     val activityPermissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission()
     ) {
-        permissionsReady = hasCorePermissions(context)
-        if (permissionsReady) viewModel.ensureMonitoringStarted()
+        refreshPermissions()
     }
     val notificationPermissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission()
     ) {
-        permissionsReady = hasCorePermissions(context)
-        if (permissionsReady) viewModel.ensureMonitoringStarted()
+        refreshPermissions()
     }
     val requestNotificationAccess: () -> Unit = {
         if (
@@ -150,14 +148,10 @@ fun LifeLinkApp(viewModel: LifeLinkViewModel) {
     }
 
     LaunchedEffect(setupCompleted, contacts.isNotEmpty()) {
-        permissionsReady = hasCorePermissions(context)
-        viewModel.refreshSmsSetup()
-        if (setupCompleted && permissionsReady) viewModel.ensureMonitoringStarted()
+        refreshPermissions()
     }
     LifecycleEventEffect(Lifecycle.Event.ON_RESUME) {
-        permissionsReady = hasCorePermissions(context)
-        viewModel.refreshSmsSetup()
-        if (setupCompleted && permissionsReady) viewModel.ensureMonitoringStarted()
+        refreshPermissions()
     }
 
     if (!setupCompleted) {
@@ -167,10 +161,10 @@ fun LifeLinkApp(viewModel: LifeLinkViewModel) {
             contacts = contacts,
             testSmsVerification = testSmsVerification,
             monitorHours = monitorHours,
-            smsGranted = hasSmsPermission(context),
-            phoneGranted = hasPhoneStatePermission(context),
-            activityGranted = hasActivityPermission(context),
-            notificationGranted = hasNotificationPermission(context),
+            smsGranted = permissions.sms,
+            phoneGranted = permissions.phone,
+            activityGranted = permissions.activity,
+            notificationGranted = permissions.notification,
             onRefreshDevice = viewModel::refreshSmsSetup,
             onSelectSmsLine = viewModel::selectSmsLine,
             onAddContact = viewModel::addContact,
@@ -235,7 +229,7 @@ fun LifeLinkApp(viewModel: LifeLinkViewModel) {
             when (selectedTab) {
                 0 -> DashboardTab(
                     viewModel = viewModel,
-                    permissionsReady = permissionsReady,
+                    permissions = permissions,
                     smsSetupState = smsSetupState,
                     requestSmsPermission = { smsPermissionLauncher.launch(Manifest.permission.SEND_SMS) },
                     requestPhonePermission = {
@@ -259,9 +253,9 @@ fun LifeLinkApp(viewModel: LifeLinkViewModel) {
 }
 
 @Composable
-private fun DashboardTab(
+internal fun DashboardTab(
     viewModel: LifeLinkViewModel,
-    permissionsReady: Boolean,
+    permissions: SafetyPermissions,
     smsSetupState: SmsSetupState,
     requestSmsPermission: () -> Unit,
     requestPhonePermission: () -> Unit,
@@ -269,7 +263,7 @@ private fun DashboardTab(
     requestNotificationPermission: () -> Unit,
     openSetup: () -> Unit
 ) {
-    val context = LocalContext.current
+    val permissionsReady = permissions.allGranted
     val remainingSeconds by viewModel.remainingSeconds.collectAsState()
     val lastActivity by viewModel.lastSensingMsg.collectAsState()
     val alertState by viewModel.alertState.collectAsState()
@@ -294,16 +288,16 @@ private fun DashboardTab(
     val monitoringActive = isMonitoring || runtimeState == MonitoringRuntimeState.STARTING
     val monitoringBlockReason = SafetyReadiness.monitoringBlockReason(
         smsSetupState = smsSetupState,
-        smsPermissionGranted = hasSmsPermission(context),
-        phonePermissionGranted = hasPhoneStatePermission(context),
-        activityPermissionGranted = hasActivityPermission(context),
-        notificationPermissionGranted = hasNotificationPermission(context),
+        smsPermissionGranted = permissions.sms,
+        phonePermissionGranted = permissions.phone,
+        activityPermissionGranted = permissions.activity,
+        notificationPermissionGranted = permissions.notification,
         hasEmergencyContacts = contacts.isNotEmpty(),
         testSmsState = testSmsVerification.state
     )
     val sosBlockReason = SafetyReadiness.sosBlockReason(
         smsSetupState = smsSetupState,
-        smsPermissionGranted = hasSmsPermission(context),
+        smsPermissionGranted = permissions.sms,
         hasEmergencyContacts = contacts.isNotEmpty()
     )
     val canStart = permissionsReady && smsReady && monitoringBlockReason == null
@@ -349,7 +343,7 @@ private fun DashboardTab(
     }
 
     LazyColumn(
-        modifier = Modifier.fillMaxSize().padding(20.dp),
+        modifier = Modifier.fillMaxSize().padding(20.dp).testTag("dashboard_list"),
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
         item {
@@ -380,11 +374,11 @@ private fun DashboardTab(
         if (!permissionsReady || !smsReady) {
             item {
                 PermissionSetupCard(
-                    smsGranted = hasSmsPermission(context),
-                    phoneStateGranted = hasPhoneStatePermission(context),
+                    smsGranted = permissions.sms,
+                    phoneStateGranted = permissions.phone,
                     smsSetupState = smsSetupState,
-                    activityGranted = hasActivityPermission(context),
-                    notificationGranted = hasNotificationPermission(context),
+                    activityGranted = permissions.activity,
+                    notificationGranted = permissions.notification,
                     requestSmsPermission = requestSmsPermission,
                     requestPhonePermission = requestPhonePermission,
                     selectSmsLine = viewModel::selectSmsLine,
@@ -510,7 +504,8 @@ private fun DashboardTab(
         if (!simpleHome || dailyCheckInEnabled) item {
             Card(modifier = Modifier.fillMaxWidth()) {
                 Column(Modifier.padding(16.dp)) {
-                    Text("매일 안부 확인", fontWeight = FontWeight.Bold)
+                    Text("매일 안부 확인 · 선택 기능", fontWeight = FontWeight.Bold)
+                    Text("사용 안 함을 선택하면 정기 안부 알림과 안부 미응답 문자를 보내지 않습니다. 무활동 감지는 계속 작동합니다.", fontSize = 14.sp)
                     Text("정한 시각부터 2시간 동안 활동도 응답도 없으면 보호자에게 알립니다.", fontSize = 16.sp)
                     Text("모니터링 중 잠금 해제·반복 걸음 등 활동이 감지되면 자동 완료됩니다. 12시간 등 무활동 설정과는 별도입니다.", fontSize = 14.sp)
                     if (dailyScheduleText.isNotBlank()) {
@@ -590,9 +585,6 @@ private fun DashboardTab(
             }
         }
 
-        if (!simpleHome) item {
-            FamilyPlanCard()
-        }
         item {
             Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)) {
                 Row(Modifier.padding(16.dp), verticalAlignment = Alignment.Top) {
@@ -607,29 +599,6 @@ private fun DashboardTab(
     }
 }
 
-@Composable
-private fun FamilyPlanCard() {
-    Card(
-        colors = CardDefaults.cardColors(containerColor = Color(0xFFEAF4F1)),
-        modifier = Modifier.fillMaxWidth()
-    ) {
-        Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Text("Life Link Family · 준비 중", fontSize = 20.sp, fontWeight = FontWeight.Bold)
-            Text(
-                "${LifeLinkFamilyPlan.monthlyPriceLabel} · ${LifeLinkFamilyPlan.annualPriceLabel} " +
-                    "· ${LifeLinkFamilyPlan.TRIAL_DAYS}일 무료 체험 예정",
-                fontWeight = FontWeight.Bold
-            )
-            Text("무료 안전 기능은 그대로 유지하고, 가족이 원격으로 상태를 확인하는 기능만 구독에 포함합니다.")
-            LifeLinkFamilyPlan.benefits.forEach { benefit -> Text("• $benefit") }
-            Text(
-                "아직 결제 기능은 연결되지 않았으며 현재 화면에서 요금이 청구되지 않습니다.",
-                fontSize = 14.sp,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-        }
-    }
-}
 @Composable
 private fun PermissionSetupCard(
     smsGranted: Boolean,
@@ -942,7 +911,7 @@ private fun PreAlertDialog(onDismiss: () -> Unit) {
         onDismissRequest = {},
         icon = { Icon(Icons.Default.Warning, null) },
         title = { Text("잘 계신가요?") },
-        text = { Text("30분 안에 무사함을 확인하지 않으면 등록된 보호자에게 긴급 문자를 보냅니다.") },
+        text = { Text("30분 안에 활동이 감지되거나 '무사합니다'를 누르면 취소됩니다. 활동도 응답도 없으면 보호자에게 긴급 문자를 보냅니다.") },
         confirmButton = {
             Button(onClick = onDismiss, modifier = Modifier.fillMaxWidth().height(56.dp)) {
                 Text("무사합니다", fontWeight = FontWeight.Bold)
@@ -1002,26 +971,6 @@ internal fun notificationSettingsIntent(packageName: String): Intent =
     } else {
         Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:$packageName"))
     }
-
-private fun hasSmsPermission(context: Context): Boolean =
-    ContextCompat.checkSelfPermission(context, Manifest.permission.SEND_SMS) ==
-        PackageManager.PERMISSION_GRANTED
-
-private fun hasPhoneStatePermission(context: Context): Boolean =
-    ContextCompat.checkSelfPermission(context, Manifest.permission.READ_PHONE_STATE) ==
-        PackageManager.PERMISSION_GRANTED
-
-private fun hasActivityPermission(context: Context): Boolean =
-    Build.VERSION.SDK_INT < Build.VERSION_CODES.Q ||
-        ContextCompat.checkSelfPermission(context, Manifest.permission.ACTIVITY_RECOGNITION) ==
-        PackageManager.PERMISSION_GRANTED
-
-private fun hasNotificationPermission(context: Context): Boolean =
-    SafetyNotificationCapability.canPost(context)
-
-private fun hasCorePermissions(context: Context): Boolean =
-    hasSmsPermission(context) && hasPhoneStatePermission(context) &&
-        hasActivityPermission(context) && hasNotificationPermission(context)
 
 private fun formatRemaining(seconds: Long): String {
     val hours = seconds / 3600

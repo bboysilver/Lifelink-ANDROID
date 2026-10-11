@@ -44,7 +44,7 @@ class MonitoringService : Service() {
     private var monitorJob: Job? = null
     private var lastMaintenanceMs = 0L
     private var lastHeartbeatWriteElapsedMs = 0L
-    private var lastOngoingNotificationMinute = Long.MIN_VALUE
+    private var lastOngoingMode: Boolean? = null
     private var startupFailed = false
 
     override fun onCreate() {
@@ -254,7 +254,7 @@ class MonitoringService : Service() {
             !store.wasDailyCheckInAlerted(status.dueAtMs)
     }
     private suspend fun evaluateInactivityDeadline() {
-        updateOngoingNotification(store.snapshot().remainingSeconds)
+        updateOngoingNotification()
         InactivityDeadlineTask(this, store, repository, incidents).run()
     }
 
@@ -298,7 +298,6 @@ class MonitoringService : Service() {
 
     private fun confirmSafe(reason: String) {
         store.recordActivity(System.currentTimeMillis(), reason)
-        NotificationManagerCompat.from(this).cancel(ALERT_NOTIFICATION_ID)
         serviceScope.launch {
             repository.insertLog("SENSOR_RESET", "사용자가 알림에서 무사함을 확인했습니다.")
         }
@@ -330,13 +329,14 @@ class MonitoringService : Service() {
         ServiceCompat.startForeground(
             this,
             MONITORING_NOTIFICATION_ID,
-            buildOngoingNotification(store.snapshot().remainingSeconds),
+            buildOngoingNotification(),
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
                 ServiceInfo.FOREGROUND_SERVICE_TYPE_HEALTH
             } else {
                 0
             }
         )
+        lastOngoingMode = store.desiredEnabled
         true
     } catch (error: RuntimeException) {
         val message = error.message ?: "포그라운드 서비스를 시작하지 못했습니다."
@@ -351,7 +351,7 @@ class MonitoringService : Service() {
         }
         false
     }
-    private fun buildOngoingNotification(remainingSeconds: Long): android.app.Notification {
+    private fun buildOngoingNotification(): android.app.Notification {
         val builder = NotificationCompat.Builder(this, MONITORING_CHANNEL_ID)
             .setSmallIcon(android.R.drawable.ic_dialog_info)
             .setContentTitle(
@@ -362,25 +362,32 @@ class MonitoringService : Service() {
             )
             .setContentText(
                 when {
-                    store.desiredEnabled -> "다음 안전 확인까지 ${formatRemaining(remainingSeconds)}"
+                    store.desiredEnabled -> "휴대전화 활동을 자동으로 확인합니다. 앱을 열지 않아도 됩니다."
                     else -> "안부 확인 상태를 처리하고 있습니다."
                 }
             )
             .setContentIntent(launchAppIntent())
             .setOngoing(true)
             .setOnlyAlertOnce(true)
+            .setSilent(true)
+            .setPriority(NotificationCompat.PRIORITY_LOW)
             .setCategory(NotificationCompat.CATEGORY_SERVICE)
 
         return builder.build()
     }
-    private fun updateOngoingNotification(remainingSeconds: Long) {
-        val minute = MonitoringUpdatePolicy.remainingMinute(remainingSeconds)
-        if (minute == lastOngoingNotificationMinute) return
-        lastOngoingNotificationMinute = minute
-        notifyIfAllowed(MONITORING_NOTIFICATION_ID, buildOngoingNotification(remainingSeconds))
+    private fun updateOngoingNotification() {
+        if (lastOngoingMode == store.desiredEnabled) return
+        lastOngoingMode = store.desiredEnabled
+        notifyIfAllowed(MONITORING_NOTIFICATION_ID, buildOngoingNotification())
     }
 
     private fun showAlertNotification(title: String, body: String) {
+        if (store.desiredEnabled) {
+            if (store.claimWatchdogAlert(MonitoringWatchdogPolicy.alertToken(store.snapshot()))) {
+                MonitoringStatusNotifier.showUnexpectedStop(this, body)
+            }
+            return
+        }
         val notification = NotificationCompat.Builder(this, SafetyNotificationCapability.ALERT_CHANNEL_ID)
             .setSmallIcon(android.R.drawable.ic_dialog_alert)
             .setContentTitle(title)
@@ -388,6 +395,7 @@ class MonitoringService : Service() {
             .setContentIntent(launchAppIntent())
             .setPriority(NotificationCompat.PRIORITY_HIGH)
             .setCategory(NotificationCompat.CATEGORY_ERROR)
+            .setOnlyAlertOnce(true)
             .setAutoCancel(false)
             .build()
         notifyIfAllowed(ALERT_NOTIFICATION_ID, notification)
@@ -427,12 +435,6 @@ class MonitoringService : Service() {
                 enableVibration(true)
             }
         )
-    }
-
-    private fun formatRemaining(seconds: Long): String {
-        val hours = seconds / 3600
-        val minutes = (seconds % 3600) / 60
-        return if (hours > 0) "${hours}시간 ${minutes}분" else "${minutes}분"
     }
 
     companion object {
@@ -509,6 +511,4 @@ internal object MonitoringUpdatePolicy {
     fun shouldWriteHeartbeat(lastWriteMs: Long, nowMs: Long): Boolean =
         lastWriteMs <= 0L || nowMs - lastWriteMs >= HEARTBEAT_WRITE_INTERVAL_MS
 
-    fun remainingMinute(remainingSeconds: Long): Long =
-        (remainingSeconds.coerceAtLeast(0L) + 59L) / 60L
 }

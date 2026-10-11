@@ -5,6 +5,7 @@ import android.content.Context
 import android.os.SystemClock
 import com.example.BuildConfig
 import com.example.monitoring.InactivityDeadlineScheduler
+import com.example.monitoring.InactivityDeadlineTask
 import com.example.monitoring.DailyCheckInScheduler
 import com.example.monitoring.MonitoringService
 import kotlin.math.abs
@@ -150,6 +151,7 @@ class MonitoringStore(context: Context) {
 
     fun beginSetupReview() = synchronized(ACTIVITY_LOCK) {
         InactivityDeadlineScheduler(appContext).cancel()
+        InactivityDeadlineTask.cancelPreAlert(appContext)
         preferences.edit()
             .putBoolean(KEY_SETUP_COMPLETED, false)
             .putBoolean(KEY_DESIRED_ENABLED, false)
@@ -215,6 +217,7 @@ class MonitoringStore(context: Context) {
     ) = synchronized(ACTIVITY_LOCK) {
         val newDeadline = configuredDeadlineMs(nowMs)
         val newEventMs = nextInactivityEventMs(newDeadline)
+        InactivityDeadlineTask.cancelPreAlert(appContext)
         preferences.edit()
             .putBoolean(KEY_DESIRED_ENABLED, true)
             .putString(KEY_RUNTIME_STATE, MonitoringRuntimeState.STARTING.name)
@@ -234,6 +237,7 @@ class MonitoringStore(context: Context) {
 
     fun stop(nowMs: Long = System.currentTimeMillis()) = synchronized(ACTIVITY_LOCK) {
         InactivityDeadlineScheduler(appContext).cancel()
+        InactivityDeadlineTask.cancelPreAlert(appContext)
         preferences.edit()
             .putBoolean(KEY_DESIRED_ENABLED, false)
             .putString(KEY_RUNTIME_STATE, MonitoringRuntimeState.STOPPED.name)
@@ -253,6 +257,7 @@ class MonitoringStore(context: Context) {
     ): Long = synchronized(ACTIVITY_LOCK) {
         val newDeadline = configuredDeadlineMs(nowMs)
         val newEventMs = nextInactivityEventMs(newDeadline)
+        InactivityDeadlineTask.cancelPreAlert(appContext)
         preferences.edit()
             .putLong(KEY_LAST_ACTIVITY_MS, nowMs)
             .putString(KEY_LAST_ACTIVITY_REASON, reason)
@@ -456,6 +461,7 @@ class MonitoringStore(context: Context) {
         hour: Int?,
         nowMs: Long = System.currentTimeMillis()
     ): Long = synchronized(DAILY_LOCK) {
+        MonitoringService.cancelDailyNotification(appContext)
         if (hour == null) {
             preferences.edit()
                 .putBoolean(KEY_DAILY_CHECK_IN_ENABLED, false)
@@ -631,9 +637,12 @@ class MonitoringStore(context: Context) {
                 .apply()
         }
     }
-    fun markPreAlert(deadlineMs: Long) = synchronized(ACTIVITY_LOCK) {
-        if (this.deadlineMs != deadlineMs) return@synchronized
+    fun markPreAlert(deadlineMs: Long, postNotification: () -> Boolean = { true }): Boolean = synchronized(ACTIVITY_LOCK) {
+        if (!desiredEnabled || this.deadlineMs != deadlineMs || wasPreAlerted(deadlineMs)) return@synchronized false
+        // Posting and resetting share the lock, so late work cannot restore a stale warning.
+        if (!postNotification()) return@synchronized false
         preferences.edit().putLong(KEY_PRE_ALERT_DEADLINE_MS, deadlineMs).apply()
+        true
     }
 
     fun markEmergency(eventMs: Long) = synchronized(ACTIVITY_LOCK) {

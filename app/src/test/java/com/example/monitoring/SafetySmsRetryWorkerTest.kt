@@ -140,7 +140,7 @@ class SafetySmsRetryWorkerTest {
         assertNull(SafetySmsRetryTask(context).run(eventId, 2_001L))
 
         val notification = context.getSystemService(NotificationManager::class.java)
-            .activeNotifications.single { it.id == SafetySmsStatusNotifier.NOTIFICATION_ID }.notification
+            .activeNotifications.single { it.id == SafetySmsStatusNotifier.CONFIRMED_NOTIFICATION_ID }.notification
         assertEquals("SOS 문자 발송 확인", notification.extras.getString(Notification.EXTRA_TITLE))
         assertTrue(incidents.get("sos:1000")!!.incident.completedAtMs != null)
         assertEquals("", incidents.get("sos:1000")!!.recipients.single().phoneNumber)

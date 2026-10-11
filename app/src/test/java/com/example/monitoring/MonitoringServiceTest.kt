@@ -3,6 +3,7 @@ package com.example.monitoring
 import android.Manifest
 import android.app.Application
 import android.app.Service
+import android.app.Notification
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
@@ -18,6 +19,7 @@ import com.example.data.MonitoringStore
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
+import org.junit.Assert.assertNull
 import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -62,6 +64,7 @@ class MonitoringServiceTest {
             assertEquals(MonitoringRuntimeState.ERROR, store.snapshot().runtimeState)
             assertFalse(store.snapshot().isRunning)
             assertEquals(initializationError, store.snapshot().serviceError)
+            assertFalse(store.claimWatchdogAlert(MonitoringWatchdogPolicy.alertToken(store.snapshot())))
         } finally {
             controller.destroy()
         }
@@ -131,6 +134,20 @@ class MonitoringServiceTest {
             .putLong("daily_prompted_due_at_ms", dueAtMs)
             .putLong("daily_response_deadline_at_ms", nowMs + 3_600_000L)
             .commit()
+    }
+
+    @Test
+    @Config(sdk = [24])
+    fun requiredOngoingNotificationIsSilentOnLegacyAndroid() {
+        prepareDailyOnlyService()
+        val controller = Robolectric.buildService(MonitoringService::class.java).create()
+        try {
+            val notification = shadowOf(controller.get()).lastForegroundNotification
+            assertEquals(Notification.PRIORITY_LOW, notification.priority)
+            assertNull(notification.sound)
+            assertNull(notification.vibrate)
+            assertEquals(0, notification.defaults and (Notification.DEFAULT_SOUND or Notification.DEFAULT_VIBRATE))
+        } finally { controller.destroy() }
     }
 
     private fun configureSms() {

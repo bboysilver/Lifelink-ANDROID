@@ -4,6 +4,9 @@ import android.Manifest
 import android.app.Activity
 import android.app.AlarmManager
 import android.app.Application
+import android.app.NotificationManager
+import android.app.Notification
+import androidx.core.app.NotificationCompat
 import android.content.Context
 import android.content.Intent
 import androidx.room.Room
@@ -103,7 +106,7 @@ class InactivityDeadlineTest {
 
     @Test
     fun safeActionWorksWithoutStartingAForegroundService() {
-        store.beginStart()
+        store.beginStart(nowMs = System.currentTimeMillis() - 1_000L)
         val deadline = store.deadlineMs
         InactivityDeadlineReceiver().onReceive(context,
             Intent(InactivityDeadlineReceiver.ACTION_SAFE)
@@ -111,5 +114,50 @@ class InactivityDeadlineTest {
         )
         assertNotEquals(deadline, store.deadlineMs)
         assertNull(shadowOf(context).nextStartedService)
+    }
+
+    @Test
+    fun automaticActivityRemovesOnlyItsWarningAndStaleWorkCannotRestoreIt() = runBlocking {
+        val manager = context.getSystemService(NotificationManager::class.java)
+        val deadline = store.deadlineMs
+        val warningAt = deadline - DeadlineCalculator.PRE_ALERT_SECONDS * 1_000L
+        task.run(deadline, warningAt, warningAt - now)
+        assertNotNull(manager.activeNotifications.single { it.id == InactivityDeadlineTask.PRE_ALERT_NOTIFICATION_ID })
+        manager.notify(SafetySmsStatusNotifier.NOTIFICATION_ID,
+            NotificationCompat.Builder(context, SafetyNotificationCapability.ALERT_CHANNEL_ID)
+                .setSmallIcon(android.R.drawable.ic_dialog_alert).setContentTitle("SOS failure").build())
+
+        store.recordActivity(warningAt + 1_000L, "unlock", warningAt + 1_000L, warningAt + 1_000L - now)
+        task.run(deadline, warningAt + 2_000L, warningAt + 2_000L - now)
+
+        assertEquals(listOf(SafetySmsStatusNotifier.NOTIFICATION_ID), manager.activeNotifications.map { it.id })
+        var stalePosted = false
+        assertFalse(store.markPreAlert(deadline) { stalePosted = true; true })
+        assertFalse(stalePosted)
+    }
+
+    @Test
+    fun preAlertIsImportantOnceAndStoppingRemovesIt() = runBlocking {
+        val manager = context.getSystemService(NotificationManager::class.java)
+        val warningAt = store.deadlineMs - DeadlineCalculator.PRE_ALERT_SECONDS * 1_000L
+        task.run(store.deadlineMs, warningAt, warningAt - now)
+        val warning = manager.activeNotifications.single().notification
+        assertEquals(SafetyNotificationCapability.ALERT_CHANNEL_ID, warning.channelId)
+        assertTrue(warning.flags and Notification.FLAG_ONLY_ALERT_ONCE != 0)
+        task.run(store.deadlineMs, warningAt + 1_000L, warningAt + 1_000L - now)
+        assertEquals(1, manager.activeNotifications.size)
+        store.stop(warningAt + 2_000L)
+        assertTrue(manager.activeNotifications.isEmpty())
+    }
+
+    @Test
+    fun activityAlsoClearsAnOldVersionWarningWithoutClearingTaggedSmsFailures() {
+        val manager = context.getSystemService(NotificationManager::class.java)
+        fun notification(title: String) = NotificationCompat.Builder(context, SafetyNotificationCapability.ALERT_CHANNEL_ID)
+            .setSmallIcon(android.R.drawable.ic_dialog_alert).setContentTitle(title).build()
+        manager.notify(1002, notification("안전 확인이 필요합니다"))
+        manager.notify("sos:1000", 1002, notification("SOS 문자 발송 확인 필요"))
+        store.recordActivity(now + 1_000L, "unlock", now + 1_000L, 1_000L)
+        assertEquals(listOf("sos:1000"), manager.activeNotifications.map { it.tag })
     }
 }

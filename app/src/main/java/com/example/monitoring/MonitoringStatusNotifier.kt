@@ -57,6 +57,7 @@ object MonitoringStatusNotifier {
             .setContentIntent(openApp)
             .setPriority(NotificationCompat.PRIORITY_HIGH)
             .setCategory(NotificationCompat.CATEGORY_ERROR)
+            .setOnlyAlertOnce(true)
             .setAutoCancel(false)
             .addAction(0, "앱 열기", openApp)
             .build()

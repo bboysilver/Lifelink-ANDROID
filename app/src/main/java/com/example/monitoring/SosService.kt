@@ -113,7 +113,7 @@ class SosService : Service() {
         internal const val EXTRA_EVENT_MS = "sos_event_ms"
         internal const val ACTION_CANCEL = "com.bboysilver.lifelink.action.CANCEL_MANUAL_SOS"
         internal const val COUNTDOWN_MS = 5_000L
-        private const val ONGOING_ID = 1004
+        internal const val ONGOING_ID = 1005
 
         fun start(context: Context) {
             val eventMs = MonitoringStore(context).sosEventMs
@@ -139,11 +139,15 @@ class SosService : Service() {
         }
 
         private fun notification(context: Context, title: String, body: String, cancellable: Boolean): Notification {
-            val builder = NotificationCompat.Builder(context, SafetyNotificationCapability.ALERT_CHANNEL_ID)
+            if (cancellable) SafetyNotificationCapability.createStatusChannel(context)
+            val builder = NotificationCompat.Builder(context,
+                if (cancellable) SafetyNotificationCapability.STATUS_CHANNEL_ID else SafetyNotificationCapability.ALERT_CHANNEL_ID)
                 .setSmallIcon(android.R.drawable.ic_dialog_alert)
                 .setContentTitle(title).setContentText(body)
                 .setStyle(NotificationCompat.BigTextStyle().bigText(body))
                 .setOnlyAlertOnce(true)
+                .setSilent(cancellable)
+                .setPriority(if (cancellable) NotificationCompat.PRIORITY_LOW else NotificationCompat.PRIORITY_HIGH)
                 .setContentIntent(PendingIntent.getActivity(context, 0, Intent(context, MainActivity::class.java),
                     PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE))
             if (cancellable) {
@@ -208,10 +212,10 @@ internal class SosDispatchTask(
             canCreateIncident = { store.activeSosEventMs == eventMs }) ?: return@withLock
         if (batch.statuses.all { it.isResolved }) {
             store.completeActiveSos(eventMs)
-            SafetySmsStatusNotifier.showCompletion(appContext, SafetySmsEventType.SOS, batch.statuses)
+            SafetySmsStatusNotifier.showCompletion(appContext, SafetySmsEventType.SOS, batch.statuses,
+                "${SafetySmsEventType.SOS.wireName}:$eventMs")
         } else {
             SafetySmsRetryWorker.enqueueRecovery(appContext)
-            if (batch.queuedAny) SosService.showStatus(appContext, "SOS 문자 발송 확인 중", "통신사 결과를 확인하며 실패 시 최대 3회 다시 시도합니다.")
         }
     }
 

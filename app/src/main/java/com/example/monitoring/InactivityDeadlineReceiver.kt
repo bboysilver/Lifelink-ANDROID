@@ -4,7 +4,6 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.util.Log
-import androidx.core.app.NotificationManagerCompat
 import com.example.data.MonitoringStore
 import androidx.work.CoroutineWorker
 import androidx.work.Data
@@ -26,7 +25,6 @@ class InactivityDeadlineReceiver : BroadcastReceiver() {
             val store = MonitoringStore(context)
             if (store.desiredEnabled && store.deadlineMs == deadline) {
                 store.recordActivity(System.currentTimeMillis(), "사전 알림에서 직접 무사 확인")
-                NotificationManagerCompat.from(context).cancel(1002)
             }
             return
         }

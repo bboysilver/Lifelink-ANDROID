@@ -3,6 +3,7 @@ package com.example.monitoring
 import android.app.Application
 import android.app.NotificationChannel
 import android.app.NotificationManager
+import android.app.Notification
 import android.content.Context
 import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
@@ -136,5 +137,32 @@ class DailyCheckInTaskTest {
         assertTrue(store.dailyCheckInError.contains("문자 권한"))
         assertTrue(result.nextRunAtMs != null)
         assertEquals(dueAtMs, store.dailyNextDueAtMs)
+    }
+
+    @Test
+    fun recoveryRestoresDailyPromptSilentlyAndDisablingItRemovesIt() = runBlocking {
+        val due = store.configureDailyCheckIn(18, 1_700_000_000_000L)
+        val manager = context.getSystemService(NotificationManager::class.java)
+        val task = DailyCheckInTask(context, store, repository)
+        task.run(due, elapsedRealtimeMs = 0L)
+        assertEquals(1, manager.activeNotifications.size)
+        task.run(due + 1_000L, restorePrompt = true, elapsedRealtimeMs = 1_000L)
+        val restored = manager.activeNotifications.single().notification
+        assertTrue(restored.flags and Notification.FLAG_ONLY_ALERT_ONCE != 0)
+        assertEquals(Notification.GROUP_ALERT_SUMMARY, restored.groupAlertBehavior)
+        assertEquals(0, restored.defaults and (Notification.DEFAULT_SOUND or Notification.DEFAULT_VIBRATE))
+        store.configureDailyCheckIn(null, due + 2_000L)
+        assertTrue(manager.activeNotifications.isEmpty())
+    }
+
+    @Test
+    fun dailyCheckInIsOptInAndDoesNotSendOrNotifyByDefault() = runBlocking {
+        val now = 1_700_000_000_000L
+        store.beginStart(now, elapsedRealtimeMs = 0L)
+        val result = DailyCheckInTask(context, store, repository).run(now + 24 * 60 * 60 * 1_000L)
+        assertEquals(DailyCheckInPhase.DISABLED, store.dailyCheckInStatus().phase)
+        assertEquals(null, result.nextRunAtMs)
+        assertTrue(store.desiredEnabled)
+        assertTrue(context.getSystemService(NotificationManager::class.java).activeNotifications.isEmpty())
     }
 }

@@ -3,6 +3,7 @@ package com.example.monitoring
 import android.annotation.SuppressLint
 import android.app.NotificationChannel
 import android.app.NotificationManager
+import android.app.Notification
 import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
@@ -43,10 +44,8 @@ internal class InactivityDeadlineTask(
         val eventMs = store.inactivityEventMs
         if (store.wasEmergencyDispatched(eventMs)) return@withLock
         if (snapshot.remainingSeconds in 1..DeadlineCalculator.PRE_ALERT_SECONDS &&
-            !store.wasPreAlerted(deadlineMs)
+            store.markPreAlert(deadlineMs) { showPreAlert(deadlineMs) }
         ) {
-            showPreAlert()
-            store.markPreAlert(deadlineMs)
             repository.insertLog("ALERT_WARNING", "설정된 안심 시간 종료 30분 전 사전 알림을 표시했습니다.")
         }
         if (snapshot.remainingSeconds == 0L) {
@@ -70,7 +69,9 @@ internal class InactivityDeadlineTask(
             )
             if (batch != null && batch.statuses.all { it.isResolved }) {
                 store.markEmergency(eventMs)
-                SafetySmsStatusNotifier.showCompletion(appContext, SafetySmsEventType.EMERGENCY, batch.statuses)
+                cancelPreAlert(appContext)
+                SafetySmsStatusNotifier.showCompletion(appContext, SafetySmsEventType.EMERGENCY, batch.statuses,
+                    "${SafetySmsEventType.EMERGENCY.wireName}:$eventMs")
             } else if (batch?.queuedAny == true) {
                 val format = java.text.SimpleDateFormat("MM/dd HH:mm:ss", java.util.Locale.KOREA)
                 repository.insertLog(
@@ -79,25 +80,26 @@ internal class InactivityDeadlineTask(
                     "마지막 활동: ${format.format(java.util.Date(snapshot.lastActivityMs))} " +
                         "(${snapshot.lastActivityReason}), 마감: ${format.format(java.util.Date(deadlineMs))}"
                 )
-                showStatus("긴급 문자 발송 확인 중", "통신사 결과를 확인하며 실패 시 최대 3회 다시 시도합니다.")
+                cancelPreAlert(appContext)
             }
         }
         InactivityDeadlineScheduler(appContext).ensureScheduled(nowMs)
     }
 
-    private fun showPreAlert() {
+    private fun showPreAlert(deadlineMs: Long): Boolean {
         val safeIntent = PendingIntent.getBroadcast(
             appContext,
             1,
             Intent(appContext, InactivityDeadlineReceiver::class.java)
                 .setAction(InactivityDeadlineReceiver.ACTION_SAFE)
-                .putExtra(InactivityDeadlineScheduler.EXTRA_DEADLINE, store.deadlineMs),
+                .putExtra(InactivityDeadlineScheduler.EXTRA_DEADLINE, deadlineMs),
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
-        notify(
-            builder("안전 확인이 필요합니다", "30분 안에 '무사합니다'를 눌러 주세요.")
+        return notify(
+            builder("안전 확인이 필요합니다", "30분 안에 활동이 감지되거나 '무사합니다'를 누르면 자동 취소됩니다.")
                 .setCategory(NotificationCompat.CATEGORY_ALARM)
-                .addAction(0, "무사합니다", safeIntent)
+                .addAction(0, "무사합니다", safeIntent),
+            PRE_ALERT_NOTIFICATION_ID
         )
     }
 
@@ -117,10 +119,11 @@ internal class InactivityDeadlineTask(
                 )
             )
             .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setOnlyAlertOnce(true)
             .setAutoCancel(false)
 
     @SuppressLint("MissingPermission")
-    private fun notify(builder: NotificationCompat.Builder) {
+    private fun notify(builder: NotificationCompat.Builder, id: Int = ALERT_NOTIFICATION_ID): Boolean {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             appContext.getSystemService(NotificationManager::class.java).createNotificationChannel(
                 NotificationChannel(
@@ -130,14 +133,27 @@ internal class InactivityDeadlineTask(
             )
         }
         if (SafetyNotificationCapability.canPost(appContext)) {
-            NotificationManagerCompat.from(appContext).notify(ALERT_NOTIFICATION_ID, builder.build())
+            NotificationManagerCompat.from(appContext).notify(id, builder.build())
+            return true
         }
+        return false
     }
 
     companion object {
         private const val ALERT_NOTIFICATION_ID = 1002
+        internal const val PRE_ALERT_NOTIFICATION_ID = 1006
         private const val BLOCKED_RETRY_MS = 5 * 60 * 1_000L
         private val RUN_LOCK = Mutex()
         private var lastBlockedAlertMs = 0L
+
+        fun cancelPreAlert(context: Context) {
+            NotificationManagerCompat.from(context).cancel(PRE_ALERT_NOTIFICATION_ID)
+            // Pre-2.3.1 warnings shared the SMS status ID; never cancel an actual failure.
+            val manager = context.getSystemService(NotificationManager::class.java)
+            manager.activeNotifications.filter {
+                it.id == ALERT_NOTIFICATION_ID && it.tag == null &&
+                    it.notification.extras.getString(Notification.EXTRA_TITLE) == "안전 확인이 필요합니다"
+            }.forEach { manager.cancel(it.tag, it.id) }
+        }
     }
 }

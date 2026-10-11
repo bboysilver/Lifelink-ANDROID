@@ -156,7 +156,7 @@ internal class DailyCheckInTask(
                         repository.insertLog("DAILY_CHECK_IN", "오늘의 안부 확인을 요청했습니다.")
                     }
                 } else if (restorePrompt) {
-                    showPromptNotification(status.dueAtMs)
+                    showPromptNotification(status.dueAtMs, silent = true)
                     repository.insertLog("DAILY_CHECK_IN", "기기 재시작 후 안부 확인 알림을 다시 표시했습니다.")
                 }
                 DailyCheckInRunResult(status.dueAtMs)
@@ -303,7 +303,7 @@ internal class DailyCheckInTask(
             }
             incidents.completeAndRedact(incidentId, nowMs)
             DailyCheckInScheduler(appContext).ensureScheduled(nowMs, elapsedRealtimeMs)
-            SafetySmsStatusNotifier.showCompletion(appContext, SafetySmsEventType.DAILY, statuses)
+            SafetySmsStatusNotifier.showCompletion(appContext, SafetySmsEventType.DAILY, statuses, incidentId)
             return DailyCheckInRunResult(dueAtMs)
         }
 
@@ -312,10 +312,6 @@ internal class DailyCheckInTask(
             repository.insertLog("DAILY_DISPATCH", "매일 안부 확인 미응답 문자 발송 요청",
                 "설정: ${store.dailyCheckInHour}시, 요청 기준: ${format.format(java.util.Date(dueAtMs))}, " +
                     "응답 마감: ${format.format(java.util.Date(store.dailyResponseDeadlineAtMs))}")
-            showStatusNotification(
-                "안부 미응답 문자 발송 확인 중",
-                "통신사 결과를 확인하며 실패 시 최대 3회 다시 시도합니다."
-            )
         }
         val nextRunAtMs = statuses
             .filterNot { it.isResolved }
@@ -349,7 +345,7 @@ internal class DailyCheckInTask(
         return DailyCheckInRunResult(dueAtMs, nowMs + BLOCKED_RETRY_MS)
     }
 
-    private fun showPromptNotification(dueAtMs: Long) {
+    private fun showPromptNotification(dueAtMs: Long, silent: Boolean = false) {
         createAlertChannel()
         val safeIntent = PendingIntent.getBroadcast(
             appContext,
@@ -370,6 +366,8 @@ internal class DailyCheckInTask(
             .setContentIntent(launchAppIntent())
             .setPriority(NotificationCompat.PRIORITY_HIGH)
             .setCategory(NotificationCompat.CATEGORY_REMINDER)
+            .setOnlyAlertOnce(true)
+            .setSilent(silent)
             .setAutoCancel(false)
             .addAction(0, "괜찮아요", safeIntent)
             .build()
@@ -388,6 +386,7 @@ internal class DailyCheckInTask(
             .setContentIntent(launchAppIntent())
             .setPriority(NotificationCompat.PRIORITY_HIGH)
             .setCategory(NotificationCompat.CATEGORY_ERROR)
+            .setOnlyAlertOnce(true)
             .setAutoCancel(false)
             .build()
         notifyIfAllowed(ALERT_NOTIFICATION_ID, notification)

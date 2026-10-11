@@ -217,7 +217,7 @@ internal class SafetySmsRetryTask(
         if (statuses.isEmpty() || statuses.any { !it.isResolved }) return
 
         if (event.type != SafetySmsEventType.DAILY || store.dailyNextDueAtMs == event.occurredAtMs) {
-            SafetySmsStatusNotifier.showCompletion(appContext, event.type, statuses)
+            SafetySmsStatusNotifier.showCompletion(appContext, event.type, statuses, event.incidentId)
         }
 
         when (event.type) {

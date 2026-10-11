@@ -13,12 +13,14 @@ import com.example.MainActivity
 
 internal object SafetySmsStatusNotifier {
     internal const val NOTIFICATION_ID = 1002
+    internal const val CONFIRMED_NOTIFICATION_ID = 1007
 
     @SuppressLint("MissingPermission")
     fun showCompletion(
         context: Context,
         type: SafetySmsEventType,
-        statuses: List<SmsDispatchStatus>
+        statuses: List<SmsDispatchStatus>,
+        incidentId: String
     ) {
         if (statuses.isEmpty() || statuses.any { !it.isResolved }) return
         val appContext = context.applicationContext
@@ -54,7 +56,10 @@ internal object SafetySmsStatusNotifier {
             )
         }
         if (!SafetyNotificationCapability.canPost(appContext)) return
-        val notification = NotificationCompat.Builder(appContext, SafetyNotificationCapability.ALERT_CHANNEL_ID)
+        val confirmed = failedCount == 0
+        if (confirmed) SafetyNotificationCapability.createStatusChannel(appContext)
+        val notification = NotificationCompat.Builder(appContext,
+            if (confirmed) SafetyNotificationCapability.STATUS_CHANNEL_ID else SafetyNotificationCapability.ALERT_CHANNEL_ID)
             .setSmallIcon(android.R.drawable.ic_dialog_alert)
             .setContentTitle(title)
             .setContentText(body)
@@ -65,11 +70,14 @@ internal object SafetySmsStatusNotifier {
                     PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
                 )
             )
-            .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setPriority(if (confirmed) NotificationCompat.PRIORITY_LOW else NotificationCompat.PRIORITY_HIGH)
+            .setSilent(confirmed)
             .setCategory(NotificationCompat.CATEGORY_STATUS)
             .setOnlyAlertOnce(true)
             .setAutoCancel(false)
             .build()
-        NotificationManagerCompat.from(appContext).notify(NOTIFICATION_ID, notification)
+        NotificationManagerCompat.from(appContext).notify(
+            incidentId, if (confirmed) CONFIRMED_NOTIFICATION_ID else NOTIFICATION_ID, notification
+        )
     }
 }

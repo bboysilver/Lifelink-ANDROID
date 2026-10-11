@@ -3,6 +3,7 @@ package com.example.monitoring
 import android.Manifest
 import android.app.Application
 import android.app.Service
+import android.app.NotificationManager
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
@@ -137,5 +138,20 @@ class SosServiceTest {
             assertEquals(event, store.pendingSosEventMs)
             assertFalse(store.desiredEnabled)
         } finally { controller.destroy() }
+    }
+
+    @Test
+    fun sosForegroundCannotReplaceOrRemoveAMonitoringStopWarning() {
+        val manager = context.getSystemService(NotificationManager::class.java)
+        MonitoringStatusNotifier.showUnexpectedStop(context, "test stop")
+        store.beginSos(System.currentTimeMillis() + 5_000L)
+        val controller = Robolectric.buildService(SosService::class.java).create()
+        try {
+            assertNotEquals(MonitoringStatusNotifier.NOTIFICATION_ID, SosService.ONGOING_ID)
+            assertTrue(manager.activeNotifications.any { it.id == MonitoringStatusNotifier.NOTIFICATION_ID })
+            assertEquals(SafetyNotificationCapability.STATUS_CHANNEL_ID,
+                shadowOf(controller.get()).lastForegroundNotification.channelId)
+        } finally { controller.destroy() }
+        assertTrue(manager.activeNotifications.any { it.id == MonitoringStatusNotifier.NOTIFICATION_ID })
     }
 }
