@@ -1,5 +1,6 @@
 package com.example.data
 
+import androidx.room.withTransaction
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.withContext
@@ -8,6 +9,8 @@ class LifeLinkRepository(private val db: AppDatabase) {
 
     val allContacts: Flow<List<Contact>> = db.contactDao().getAllContacts()
     val allLogs: Flow<List<EventLog>> = db.eventLogDao().getAllEventLogs()
+    val lastSmsSentAt: Flow<Long?> = db.eventLogDao().getLastSmsSentAt()
+    val recentSafetyReviews: Flow<List<SafetyReviewItem>> = db.safetyIncidentDao().getRecentReviews()
 
     // Preferences / Settings Keys
     companion object {
@@ -52,12 +55,43 @@ class LifeLinkRepository(private val db: AppDatabase) {
     }
 
     suspend fun clearLogs() = withContext(Dispatchers.IO) {
-        db.eventLogDao().clearLogs()
-        db.safetyIncidentDao().deleteCompletedBefore(Long.MAX_VALUE)
+        db.withTransaction {
+            db.eventLogDao().clearLogs()
+            db.safetyIncidentDao().clearFollowUps()
+            db.safetyIncidentDao().deleteCompletedBefore(Long.MAX_VALUE)
+        }
     }
 
     suspend fun deleteLogsBefore(cutoffMs: Long): Int = withContext(Dispatchers.IO) {
+        db.safetyIncidentDao().deleteFollowUpsBefore(cutoffMs)
         db.eventLogDao().deleteBefore(cutoffMs)
+    }
+
+    suspend fun recordFamilyFollowUp(
+        incidentId: String,
+        status: FamilyFollowUpStatus,
+        nowMs: Long = System.currentTimeMillis()
+    ): FollowUpSaveResult = withContext(Dispatchers.IO) {
+        db.withTransaction {
+            val dao = db.safetyIncidentDao()
+            if (dao.getIncident(incidentId) == null ||
+                dao.getRecipients(incidentId).none { it.attemptCount > 0 }
+            ) return@withTransaction FollowUpSaveResult.EVENT_UNAVAILABLE
+            if (dao.getFollowUp(incidentId)?.status == status.name) {
+                return@withTransaction FollowUpSaveResult.UNCHANGED
+            }
+            // A local, manually entered note is not a recipient acknowledgement.
+            dao.saveFollowUp(SafetyFollowUp(incidentId, status.name, nowMs))
+            db.eventLogDao().insertLog(
+                EventLog(
+                    timestamp = nowMs,
+                    type = "FAMILY_FOLLOW_UP",
+                    message = "가족 확인 결과를 직접 기록했습니다: ${status.label}",
+                    detail = "사건: $incidentId · 이 기기에만 저장됨"
+                )
+            )
+            FollowUpSaveResult.SAVED
+        }
     }
 
     private fun maskPhone(phoneNumber: String): String {

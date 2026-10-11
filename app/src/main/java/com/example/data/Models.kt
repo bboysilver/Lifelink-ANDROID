@@ -63,3 +63,38 @@ data class SafetyRecipient(
     val dispatchState: String = "NOT_QUEUED",
     val updatedAtMs: Long
 )
+
+enum class FamilyFollowUpStatus(val label: String) {
+    CONTACTING("연락 중"),
+    CONFIRMED_SAFE("직접 안부 확인함"),
+    HELP_NEEDED("도움 필요")
+}
+
+@Entity(
+    tableName = "safety_followups",
+    foreignKeys = [
+        ForeignKey(
+            entity = SafetyIncident::class,
+            parentColumns = ["id"],
+            childColumns = ["incidentId"],
+            onDelete = ForeignKey.CASCADE
+        )
+    ]
+)
+data class SafetyFollowUp(
+    @PrimaryKey val incidentId: String,
+    val status: String,
+    val updatedAtMs: Long
+)
+
+data class SafetyReviewItem(
+    val incidentId: String,
+    val type: String,
+    val occurredAtMs: Long,
+    val sentRecipients: Int,
+    val totalRecipients: Int,
+    val followUpStatus: String?,
+    val followUpUpdatedAtMs: Long?
+)
+
+enum class FollowUpSaveResult { SAVED, UNCHANGED, EVENT_UNAVAILABLE }

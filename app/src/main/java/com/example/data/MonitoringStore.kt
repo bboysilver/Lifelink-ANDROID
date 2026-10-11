@@ -65,6 +65,10 @@ class MonitoringStore(context: Context) {
             preferences.edit().putString(KEY_DEVICE_ALIAS, normalized).apply()
         }
 
+    var simpleHomeEnabled: Boolean
+        get() = preferences.getBoolean(KEY_SIMPLE_HOME, false)
+        set(value) = preferences.edit().putBoolean(KEY_SIMPLE_HOME, value).apply()
+
     val desiredEnabled: Boolean
         get() = preferences.getBoolean(KEY_DESIRED_ENABLED, false)
 
@@ -719,6 +723,7 @@ class MonitoringStore(context: Context) {
         private const val KEY_WATCHDOG_ALERT_TOKEN = "watchdog_alert_token"
         private const val KEY_SERVICE_ERROR = "service_error"
         private const val KEY_DEVICE_ALIAS = "device_alias"
+        private const val KEY_SIMPLE_HOME = "simple_home_enabled"
         private const val KEY_SMS_SUBSCRIPTION_ID = "sms_subscription_id"
         private const val KEY_DAILY_CHECK_IN_ENABLED = "daily_check_in_enabled"
         private const val KEY_DAILY_CHECK_IN_HOUR = "daily_check_in_hour"

@@ -1,10 +1,17 @@
 package com.example.monitoring
 
 object EmergencyMessageBuilder {
-    fun build(deviceAlias: String, batteryPercent: Int?): String {
+    fun build(
+        deviceAlias: String,
+        batteryPercent: Int?,
+        lastActivityMs: Long = 0L,
+        monitorHours: Int? = null
+    ): String {
         val batteryText = batteryPercent?.let { "$it%" } ?: "확인 불가"
         return "[라이프링크 안전 알림]\n" +
             "$deviceAlias 님의 스마트폰 활동이 설정 시간 동안 확인되지 않았습니다.\n" +
+            "발송 사유: ${monitorHours?.let { "${it}시간" } ?: "설정 시간"} 무활동\n" +
+            "마지막 감지 활동: ${formatTime(lastActivityMs)}\n" +
             "배터리: $batteryText\n" +
             "위치 정보는 수집하지 않습니다.\n" +
             "직접 연락해 안전을 확인해 주세요."
@@ -19,10 +26,24 @@ object EmergencyMessageBuilder {
             "위치 정보는 수집하지 않습니다. 즉시 직접 연락해 주세요."
     }
 
-    fun buildDailyCheckInMissed(deviceAlias: String): String =
+    fun buildDailyCheckInMissed(
+        deviceAlias: String,
+        dueAtMs: Long = 0L,
+        lastActivityMs: Long = 0L
+    ): String =
         "[라이프링크 안부 확인]\n" +
-            "$deviceAlias 님이 오늘의 안부 확인에 응답하지 않았습니다.\n" +
+            "$deviceAlias 님의 안부 확인 기간에 유효한 활동이나 응답이 확인되지 않았습니다.\n" +
+            "발송 사유: 안부 요청 후 2시간 동안 유효 활동·응답 없음\n" +
+            "안부 확인 기준 시각: ${formatTime(dueAtMs)}\n" +
+            "마지막 감지 활동: ${formatTime(lastActivityMs)}\n" +
             "위치 정보는 수집하지 않습니다. 직접 연락해 안전을 확인해 주세요."
+
+    private fun formatTime(timestampMs: Long): String = if (timestampMs > 0L) {
+        java.text.SimpleDateFormat("yyyy-MM-dd HH:mm z", java.util.Locale.KOREA)
+            .format(java.util.Date(timestampMs))
+    } else {
+        "기록 없음"
+    }
 
     fun buildTest(deviceAlias: String): String =
         "[라이프링크 테스트]\n" +

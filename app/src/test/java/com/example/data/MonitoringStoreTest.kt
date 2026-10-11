@@ -24,6 +24,19 @@ class MonitoringStoreTest {
     }
 
     @Test
+    fun simpleHomePersistsWithoutChangingSafetySettings() {
+        val store = MonitoringStore(context)
+        store.beginStart()
+        val before = store.snapshot()
+        assertFalse(store.simpleHomeEnabled)
+        store.simpleHomeEnabled = true
+        assertTrue(MonitoringStore(context).simpleHomeEnabled)
+        assertEquals(before, store.snapshot())
+        store.simpleHomeEnabled = false
+        assertFalse(MonitoringStore(context).simpleHomeEnabled)
+    }
+
+    @Test
     fun activityAfterDailyDueConfirmsCheckInWithoutTouchingSos() {
         val store = MonitoringStore(context)
         val due = store.configureDailyCheckIn(18, 1_700_000_000_000L)

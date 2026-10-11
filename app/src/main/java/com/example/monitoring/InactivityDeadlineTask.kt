@@ -61,7 +61,10 @@ internal class InactivityDeadlineTask(
             }.queue(
                 type = SafetySmsEventType.EMERGENCY,
                 occurredAtMs = eventMs,
-                message = EmergencyMessageBuilder.build(store.deviceAlias, battery),
+                message = EmergencyMessageBuilder.build(
+                    store.deviceAlias, battery, snapshot.lastActivityMs,
+                    store.monitorHours.takeIf { store.debugMonitorMinutes == 0 }
+                ),
                 batteryPercent = battery,
                 canCreateIncident = { store.desiredEnabled && store.inactivityEventMs == eventMs }
             )

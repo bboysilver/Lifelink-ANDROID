@@ -3,6 +3,7 @@ package com.example.ui
 import android.Manifest
 import android.app.Application
 import android.content.pm.PackageManager
+import android.database.sqlite.SQLiteException
 import android.os.Build
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.AndroidViewModel
@@ -14,6 +15,9 @@ import com.example.data.Contact
 import com.example.data.ContactInsertResult
 import com.example.data.DailyCheckInPhase
 import com.example.data.EventLog
+import com.example.data.FamilyFollowUpStatus
+import com.example.data.FollowUpSaveResult
+import com.example.data.SafetyReviewItem
 import com.example.data.LifeLinkRepository
 import com.example.data.MonitoringRuntimeState
 import com.example.data.MonitoringStore
@@ -54,6 +58,7 @@ class LifeLinkViewModel(application: Application) : AndroidViewModel(application
     private val smsDispatchStore = SmsDispatchStore(context)
     private val smsDeviceManager = SmsDeviceManager(context, monitoringStore)
     private val dailyCheckInScheduler = DailyCheckInScheduler(context)
+    private var diagnosticEnvironment = SafetyDiagnosticsReader.read(context)
 
     val contacts: StateFlow<List<Contact>> = repository.allContacts.stateIn(
         scope = viewModelScope,
@@ -65,6 +70,27 @@ class LifeLinkViewModel(application: Application) : AndroidViewModel(application
         started = SharingStarted.WhileSubscribed(5_000),
         initialValue = emptyList()
     )
+    val lastSmsSentAt: StateFlow<Long?> = repository.lastSmsSentAt.stateIn(
+        scope = viewModelScope,
+        started = SharingStarted.WhileSubscribed(5_000),
+        initialValue = null
+    )
+    val safetyReviews: StateFlow<List<SafetyReviewItem>> = repository.recentSafetyReviews.stateIn(
+        scope = viewModelScope,
+        started = SharingStarted.WhileSubscribed(5_000),
+        initialValue = emptyList()
+    )
+    private val _familyNotice = MutableStateFlow("")
+    val familyNotice: StateFlow<String> = _familyNotice.asStateFlow()
+    private val _simpleHomeEnabled = MutableStateFlow(monitoringStore.simpleHomeEnabled)
+    val simpleHomeEnabled: StateFlow<Boolean> = _simpleHomeEnabled.asStateFlow()
+    private val _diagnostics = MutableStateFlow(
+        SafetyDiagnosticReport(
+            monitoringStore.snapshot(), diagnosticEnvironment,
+            "설정을 확인하는 중입니다.", System.currentTimeMillis()
+        )
+    )
+    val diagnostics: StateFlow<SafetyDiagnosticReport> = _diagnostics.asStateFlow()
 
     private val _smsSetupState = MutableStateFlow<SmsSetupState>(
         SmsSetupState.Blocked(SmsSetupIssue.CHECKING)
@@ -366,6 +392,25 @@ class LifeLinkViewModel(application: Application) : AndroidViewModel(application
         _userNotice.value = ""
     }
 
+    fun updateSimpleHome(enabled: Boolean) {
+        monitoringStore.simpleHomeEnabled = enabled
+        _simpleHomeEnabled.value = enabled
+    }
+
+    fun recordFamilyFollowUp(incidentId: String, status: FamilyFollowUpStatus) {
+        viewModelScope.launch {
+            try {
+                _familyNotice.value = when (repository.recordFamilyFollowUp(incidentId, status)) {
+                    FollowUpSaveResult.SAVED -> "${status.label} · 이 기기에 기록했습니다."
+                    FollowUpSaveResult.UNCHANGED -> "이미 같은 확인 결과가 기록되어 있습니다."
+                    FollowUpSaveResult.EVENT_UNAVAILABLE -> "삭제되었거나 발송 시도가 없는 사건입니다."
+                }
+            } catch (error: SQLiteException) {
+                _familyNotice.value = "확인 결과를 저장하지 못했습니다. 다시 시도해 주세요."
+            }
+        }
+    }
+
     fun restartSetup() {
         MonitoringService.stop(context)
         monitoringStore.beginSetupReview()
@@ -492,11 +537,16 @@ class LifeLinkViewModel(application: Application) : AndroidViewModel(application
 
     fun clearAllLogs() {
         smsDispatchStore.clearResolved()
-        viewModelScope.launch { repository.clearLogs() }
+        viewModelScope.launch {
+            repository.clearLogs()
+            _familyNotice.value = "기록을 삭제했습니다. 진행 중인 문자 전송은 유지됩니다."
+        }
     }
 
     fun refreshSmsSetup() {
         _smsSetupState.value = smsDeviceManager.inspect()
+        diagnosticEnvironment = SafetyDiagnosticsReader.read(context)
+        refreshUi()
     }
 
     fun selectSmsLine(subscriptionId: Int) {
@@ -578,6 +628,20 @@ class LifeLinkViewModel(application: Application) : AndroidViewModel(application
 
     private fun refreshUi() {
         val snapshot = monitoringStore.snapshot()
+        _diagnostics.value = SafetyDiagnosticReport(
+            snapshot = snapshot,
+            environment = diagnosticEnvironment,
+            setupProblem = SafetyReadiness.monitoringBlockReason(
+                smsSetupState = _smsSetupState.value,
+                smsPermissionGranted = diagnosticEnvironment.smsGranted,
+                phonePermissionGranted = diagnosticEnvironment.phoneGranted,
+                activityPermissionGranted = diagnosticEnvironment.activityGranted,
+                notificationPermissionGranted = diagnosticEnvironment.notificationsGranted,
+                hasEmergencyContacts = contacts.value.isNotEmpty(),
+                testSmsState = monitoringStore.testSmsVerification.state
+            ),
+            checkedAtMs = System.currentTimeMillis()
+        )
         _dailyCheckInEnabled.value = monitoringStore.dailyCheckInEnabled
         _dailyCheckInHour.value = monitoringStore.dailyCheckInHour
         _dailyCheckInDue.value = monitoringStore.dailyCheckInStatus().phase.let {

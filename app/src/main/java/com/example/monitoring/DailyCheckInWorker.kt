@@ -239,7 +239,9 @@ internal class DailyCheckInTask(
                 type = SafetySmsEventType.DAILY.wireName,
                 occurredAtMs = dueAtMs,
                 deviceAlias = store.deviceAlias,
-                message = EmergencyMessageBuilder.buildDailyCheckInMissed(store.deviceAlias),
+                message = EmergencyMessageBuilder.buildDailyCheckInMissed(
+                    store.deviceAlias, dueAtMs, store.snapshot(nowMs).lastActivityMs
+                ),
                 batteryPercent = null,
                 subscriptionId = smsSetup.line.subscriptionId,
                 contacts = contactsForNewIncident,

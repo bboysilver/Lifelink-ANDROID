@@ -13,9 +13,10 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         EventLog::class,
         AppSetting::class,
         SafetyIncident::class,
-        SafetyRecipient::class
+        SafetyRecipient::class,
+        SafetyFollowUp::class
     ],
-    version = 2,
+    version = 3,
     exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -35,7 +36,7 @@ abstract class AppDatabase : RoomDatabase() {
                     AppDatabase::class.java,
                     "lifelink_database"
                 )
-                    .addMigrations(MIGRATION_1_2)
+                    .addMigrations(MIGRATION_1_2, MIGRATION_2_3)
                     .build()
                 INSTANCE = instance
                 instance
@@ -80,6 +81,23 @@ abstract class AppDatabase : RoomDatabase() {
                 db.execSQL(
                     "CREATE INDEX IF NOT EXISTS `index_safety_recipients_incidentId` " +
                         "ON `safety_recipients` (`incidentId`)"
+                )
+            }
+        }
+
+        internal val MIGRATION_2_3 = object : Migration(2, 3) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS `safety_followups` (
+                        `incidentId` TEXT NOT NULL,
+                        `status` TEXT NOT NULL,
+                        `updatedAtMs` INTEGER NOT NULL,
+                        PRIMARY KEY(`incidentId`),
+                        FOREIGN KEY(`incidentId`) REFERENCES `safety_incidents`(`id`)
+                            ON UPDATE NO ACTION ON DELETE CASCADE
+                    )
+                    """.trimIndent()
                 )
             }
         }

@@ -46,6 +46,9 @@ interface EventLogDao {
     @Query("SELECT * FROM event_logs ORDER BY timestamp DESC LIMIT 100")
     fun getAllEventLogs(): Flow<List<EventLog>>
 
+    @Query("SELECT MAX(timestamp) FROM event_logs WHERE type = 'SMS_SENT'")
+    fun getLastSmsSentAt(): Flow<Long?>
+
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertLog(log: EventLog)
 
@@ -67,6 +70,34 @@ interface SettingDao {
 
 @Dao
 interface SafetyIncidentDao {
+    @Query(
+        """
+        SELECT i.id AS incidentId, i.type, i.occurredAtMs,
+            (SELECT COUNT(*) FROM safety_recipients r WHERE r.incidentId = i.id
+                AND r.dispatchState IN ('SENT', 'DELIVERED')) AS sentRecipients,
+            (SELECT COUNT(*) FROM safety_recipients r WHERE r.incidentId = i.id) AS totalRecipients,
+            f.status AS followUpStatus, f.updatedAtMs AS followUpUpdatedAtMs
+        FROM safety_incidents i
+        LEFT JOIN safety_followups f ON f.incidentId = i.id
+        WHERE EXISTS (SELECT 1 FROM safety_recipients r
+            WHERE r.incidentId = i.id AND r.attemptCount > 0)
+        ORDER BY i.createdAtMs DESC, i.id DESC LIMIT 20
+        """
+    )
+    fun getRecentReviews(): Flow<List<SafetyReviewItem>>
+
+    @Query("SELECT * FROM safety_followups WHERE incidentId = :incidentId")
+    suspend fun getFollowUp(incidentId: String): SafetyFollowUp?
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun saveFollowUp(followUp: SafetyFollowUp)
+
+    @Query("DELETE FROM safety_followups")
+    suspend fun clearFollowUps()
+
+    @Query("DELETE FROM safety_followups WHERE updatedAtMs < :cutoffMs")
+    suspend fun deleteFollowUpsBefore(cutoffMs: Long): Int
+
     @Query("SELECT * FROM safety_incidents WHERE id = :incidentId")
     suspend fun getIncident(incidentId: String): SafetyIncident?
 

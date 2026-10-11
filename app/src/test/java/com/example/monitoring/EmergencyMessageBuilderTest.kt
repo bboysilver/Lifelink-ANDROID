@@ -6,6 +6,32 @@ import org.junit.Test
 
 class EmergencyMessageBuilderTest {
     @Test
+    fun inactivityMessageHasCauseAndRealLastActivityTime() {
+        val timestamp = 1_700_000_000_000L
+        val expectedTime = java.text.SimpleDateFormat("yyyy-MM-dd HH:mm z", java.util.Locale.KOREA)
+            .format(java.util.Date(timestamp))
+        val message = EmergencyMessageBuilder.build("어머니", 42, timestamp, 12)
+        assertTrue(message.contains("발송 사유: 12시간 무활동"))
+        assertTrue(message.contains("마지막 감지 활동: $expectedTime"))
+    }
+
+    @Test
+    fun unknownActivityDoesNotBecome1970OrSafetyClaim() {
+        val message = EmergencyMessageBuilder.build("어머니", null)
+        assertTrue(message.contains("마지막 감지 활동: 기록 없음"))
+        assertFalse(message.contains("1970"))
+        assertFalse(message.contains("안전합니다"))
+    }
+
+    @Test
+    fun dailyMessageExplainsIndependentTwoHourReason() {
+        val message = EmergencyMessageBuilder.buildDailyCheckInMissed("아버지", 1_700_000_000_000L, 1_699_999_000_000L)
+        assertTrue(message.contains("2시간 동안 유효 활동·응답 없음"))
+        assertTrue(message.contains("안부 확인 기준 시각"))
+        assertTrue(message.contains("마지막 감지 활동"))
+    }
+
+    @Test
     fun missingBatteryIsReportedWithoutInventingLocation() {
         val message = EmergencyMessageBuilder.build(
             deviceAlias = "아버지 휴대전화",
@@ -49,7 +75,7 @@ class EmergencyMessageBuilderTest {
         val message = EmergencyMessageBuilder.buildDailyCheckInMissed("아버지")
 
         assertTrue(message.contains("안부 확인"))
-        assertTrue(message.contains("응답하지 않았습니다"))
+        assertTrue(message.contains("유효한 활동이나 응답이 확인되지 않았습니다"))
         assertTrue(message.contains("직접 연락"))
     }
 }

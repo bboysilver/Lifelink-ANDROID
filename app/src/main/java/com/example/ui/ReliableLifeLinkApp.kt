@@ -20,6 +20,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
@@ -82,6 +83,8 @@ import androidx.lifecycle.compose.LifecycleEventEffect
 import com.example.BuildConfig
 import com.example.data.Contact
 import com.example.data.EventLog
+import com.example.data.FamilyFollowUpStatus
+import com.example.data.SafetyReviewItem
 import com.example.data.MonitoringRuntimeState
 import com.example.monitoring.SafetyNotificationCapability
 import com.example.monitoring.SmsSetupIssue
@@ -284,6 +287,9 @@ private fun DashboardTab(
     val testSmsVerification by viewModel.testSmsVerification.collectAsState()
     val debugMonitorMinutes by viewModel.debugMonitorMinutes.collectAsState()
     val userNotice by viewModel.userNotice.collectAsState()
+    val simpleHome by viewModel.simpleHomeEnabled.collectAsState()
+    val diagnostics by viewModel.diagnostics.collectAsState()
+    val lastSmsSentAt by viewModel.lastSmsSentAt.collectAsState()
     val smsReady = smsSetupState is SmsSetupState.Ready
     val monitoringActive = isMonitoring || runtimeState == MonitoringRuntimeState.STARTING
     val monitoringBlockReason = SafetyReadiness.monitoringBlockReason(
@@ -302,6 +308,21 @@ private fun DashboardTab(
     )
     val canStart = permissionsReady && smsReady && monitoringBlockReason == null
     var confirmStop by remember { mutableStateOf(false) }
+    var showDiagnostics by remember { mutableStateOf(false) }
+
+    if (showDiagnostics) {
+        SafetyDiagnosticsDialog(
+            report = diagnostics,
+            smsState = smsSetupState,
+            lastSmsSentAtMs = lastSmsSentAt,
+            onRefresh = viewModel::refreshSmsSetup,
+            onRepairSetup = {
+                showDiagnostics = false
+                openSetup()
+            },
+            onDismiss = { showDiagnostics = false }
+        )
+    }
 
     if (confirmStop) {
         AlertDialog(
@@ -332,10 +353,9 @@ private fun DashboardTab(
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
         item {
-            Row(
+            Column(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
+                verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Icon(Icons.Default.Favorite, null, tint = Color(0xFFF0645A), modifier = Modifier.size(30.dp))
@@ -345,7 +365,7 @@ private fun DashboardTab(
                     onClick = {
                         if (monitoringActive) confirmStop = true else viewModel.startMonitoring()
                     },
-                    modifier = Modifier.height(56.dp).testTag("toggle_monitoring_button")
+                    modifier = Modifier.heightIn(min = 56.dp).testTag("toggle_monitoring_button")
                 ) {
                     Icon(
                         if (monitoringActive) Icons.Default.PauseCircle else Icons.Default.PlayCircle,
@@ -432,7 +452,7 @@ private fun DashboardTab(
                     if (monitoringActive) {
                         Spacer(Modifier.height(12.dp))
                         Text("다음 안전 확인까지", color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        Text(
+                        if (simpleHome) SimpleRemainingTime(remainingSeconds) else Text(
                             formatRemaining(remainingSeconds),
                             fontSize = 42.sp,
                             fontFamily = FontFamily.Monospace,
@@ -450,9 +470,9 @@ private fun DashboardTab(
             Button(
                 onClick = { viewModel.reportSurvival("수동 무사 확인") },
                 enabled = isMonitoring,
-                modifier = Modifier.fillMaxWidth().height(64.dp).testTag("survival_report_button")
+                modifier = Modifier.fillMaxWidth().heightIn(min = if (simpleHome) 80.dp else 64.dp).testTag("survival_report_button")
             ) {
-                Text("무사합니다", fontSize = 20.sp, fontWeight = FontWeight.Black)
+                Text("무사합니다", fontSize = if (simpleHome) 24.sp else 20.sp, fontWeight = FontWeight.Black)
             }
         }
 
@@ -461,9 +481,9 @@ private fun DashboardTab(
                 onClick = viewModel::startSosCountdown,
                 enabled = sosBlockReason == null,
                 colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error),
-                modifier = Modifier.fillMaxWidth().height(64.dp).testTag("sos_button")
+                modifier = Modifier.fillMaxWidth().heightIn(min = if (simpleHome) 80.dp else 64.dp).testTag("sos_button")
             ) {
-                Text("SOS · 보호자에게 도움 요청", fontSize = 18.sp, fontWeight = FontWeight.Black)
+                Text("SOS · 보호자에게 도움 요청", fontSize = if (simpleHome) 22.sp else 18.sp, fontWeight = FontWeight.Black)
             }
             Text(
                 sosBlockReason
@@ -477,6 +497,17 @@ private fun DashboardTab(
         }
 
         item {
+            SafetyToolsCard(
+                simpleHome = simpleHome,
+                onSimpleHomeChanged = viewModel::updateSimpleHome,
+                onOpenDiagnostics = {
+                    viewModel.refreshSmsSetup()
+                    showDiagnostics = true
+                }
+            )
+        }
+
+        if (!simpleHome || dailyCheckInEnabled) item {
             Card(modifier = Modifier.fillMaxWidth()) {
                 Column(Modifier.padding(16.dp)) {
                     Text("매일 안부 확인", fontWeight = FontWeight.Bold)
@@ -493,7 +524,7 @@ private fun DashboardTab(
                         )
                     }
                     Spacer(Modifier.height(10.dp))
-                    LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    if (!simpleHome) LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         item {
                             FilterChip(
                                 selected = !dailyCheckInEnabled,
@@ -525,7 +556,7 @@ private fun DashboardTab(
             }
         }
 
-        item {
+        if (!simpleHome) item {
             Card(modifier = Modifier.fillMaxWidth()) {
                 Column(Modifier.padding(16.dp)) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
@@ -559,7 +590,7 @@ private fun DashboardTab(
             }
         }
 
-        item {
+        if (!simpleHome) item {
             FamilyPlanCard()
         }
         item {
@@ -780,8 +811,29 @@ private fun ContactItem(contact: Contact, onTest: () -> Unit, onDelete: () -> Un
 @Composable
 private fun LogsTab(viewModel: LifeLinkViewModel) {
     val eventLogs by viewModel.eventLogs.collectAsState()
+    val reviews by viewModel.safetyReviews.collectAsState()
+    val familyNotice by viewModel.familyNotice.collectAsState()
     val uriHandler = LocalUriHandler.current
     var showPrivacy by remember { mutableStateOf(false) }
+    var showFamilyReviews by remember { mutableStateOf(false) }
+    var pendingFollowUp by remember { mutableStateOf<Pair<SafetyReviewItem, FamilyFollowUpStatus>?>(null) }
+
+    pendingFollowUp?.let { (incident, status) ->
+        AlertDialog(
+            onDismissRequest = { pendingFollowUp = null },
+            title = { Text("${status.label}으로 기록할까요?") },
+            text = {
+                Text("직접 통화하거나 확인한 결과만 입력해 주세요. 이 기기에만 저장되며 보호자 앱의 응답이 아닙니다. '도움 필요' 기록은 SOS를 보내지 않으며, 어떤 기록도 문자 재시도나 모니터링을 중지하지 않습니다.")
+            },
+            confirmButton = {
+                Button(onClick = {
+                    viewModel.recordFamilyFollowUp(incident.incidentId, status)
+                    pendingFollowUp = null
+                }) { Text("직접 확인한 결과 기록") }
+            },
+            dismissButton = { TextButton(onClick = { pendingFollowUp = null }) { Text("취소") } }
+        )
+    }
 
     if (showPrivacy) {
         PrivacyDialog(
@@ -814,10 +866,25 @@ private fun LogsTab(viewModel: LifeLinkViewModel) {
             }
             HorizontalDivider()
         }
-        if (eventLogs.isEmpty()) {
-            item { Text("아직 기록이 없습니다.") }
+        item {
+            LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                item { FilterChip(!showFamilyReviews, { showFamilyReviews = false }, label = { Text("동작 기록") }) }
+                item { FilterChip(showFamilyReviews, { showFamilyReviews = true }, label = { Text("가족 안부 확인 기록") }) }
+            }
+            if (familyNotice.isNotBlank()) Text(familyNotice, fontWeight = FontWeight.Bold)
+        }
+        if (showFamilyReviews) {
+            item {
+                Text("이 기기에서 가족과 직접 확인한 내용을 기록합니다. 문자 수신이나 열람을 자동 확인하는 기능이 아닙니다.")
+                Text("가족 확인 기록은 90일 후 정리됩니다. 진행 중인 문자 발송은 기록 삭제로 취소되지 않습니다.")
+                if (reviews.isEmpty()) Text("아직 보호자 문자 발송을 시도한 사건이 없습니다.")
+            }
+            items(reviews, key = { "review:${it.incidentId}" }) { review ->
+                FamilyReviewCard(review) { status -> pendingFollowUp = review to status }
+            }
         } else {
-            items(eventLogs, key = { it.id }) { LogItem(it) }
+            if (eventLogs.isEmpty()) item { Text("아직 기록이 없습니다.") }
+            else items(eventLogs, key = { it.id }) { LogItem(it) }
         }
     }
 }
@@ -916,10 +983,11 @@ private fun PrivacyDialog(onDismiss: () -> Unit, onOpenPolicy: () -> Unit) {
         title = { Text("개인정보 처리방침") },
         text = {
             Text(
-                "보호자 이름과 전화번호, 선택한 SIM, 설정, 매일 안부 응답, 최근 활동 시각, SOS·문자 결과 기록은 이 기기에만 저장됩니다. " +
-                    "긴급 시 사용자 이름과 배터리 상태를 등록한 보호자에게 기기 SIM 문자로 전달합니다. " +
+                "보호자 이름과 전화번호, 선택한 SIM, 설정, 매일 안부 응답, 최근 활동 시각, SOS·문자 결과와 수동 가족 확인 기록은 이 기기에만 저장됩니다. " +
+                    "긴급 시 사용자 이름, 발송 사유, 마지막 감지 활동 시각과 배터리 상태를 문자 유형에 따라 등록한 보호자에게 기기 SIM 문자로 전달합니다. " +
                     "위치, Firebase, Twilio, 광고 SDK, 광고 ID, 결제 SDK 또는 외부 클라우드는 사용하지 않습니다. " +
-                    "앱 데이터는 기기 백업에서 제외되며 앱 삭제 시 제거됩니다."
+                    "동작·가족 확인 기록은 90일 후 정리되며 기록 삭제로 지울 수 있습니다. 앱 데이터는 기기 백업에서 제외되며 앱 삭제 시 제거됩니다.",
+                modifier = Modifier.verticalScroll(rememberScrollState())
             )
         },
         confirmButton = { TextButton(onClick = onDismiss) { Text("확인") } },
