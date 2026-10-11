@@ -148,6 +148,7 @@ class SosService : Service() {
                 .setOnlyAlertOnce(true)
                 .setSilent(cancellable)
                 .setPriority(if (cancellable) NotificationCompat.PRIORITY_LOW else NotificationCompat.PRIORITY_HIGH)
+                .setDefaults(if (cancellable) 0 else NotificationCompat.DEFAULT_SOUND or NotificationCompat.DEFAULT_VIBRATE)
                 .setContentIntent(PendingIntent.getActivity(context, 0, Intent(context, MainActivity::class.java),
                     PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE))
             if (cancellable) {

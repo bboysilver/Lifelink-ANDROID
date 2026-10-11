@@ -123,6 +123,17 @@ class SafetySmsStatusNotifierTest {
         assertNull(notification.vibrate)
     }
 
+    @Test
+    @Config(sdk = [24])
+    fun finalFailureRequestsSoundAndVibrationOnLegacyAndroid() {
+        SafetySmsStatusNotifier.showCompletion(context, SafetySmsEventType.SOS,
+            listOf(status(SmsDispatchState.FAILED_FINAL)), "sos:1000")
+        val notification = checkNotNull(notification())
+        assertEquals(Notification.PRIORITY_HIGH, notification.priority)
+        val alertDefaults = Notification.DEFAULT_SOUND or Notification.DEFAULT_VIBRATE
+        assertEquals(alertDefaults, notification.defaults and alertDefaults)
+    }
+
     private fun notification(): Notification? = manager.activeNotifications.firstOrNull()?.notification
 
     private fun status(state: SmsDispatchState) = SmsDispatchStatus(state, 3, 3, 1_000L, 0L, 0)

@@ -56,6 +56,7 @@ object MonitoringStatusNotifier {
             .setStyle(NotificationCompat.BigTextStyle().bigText(body))
             .setContentIntent(openApp)
             .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setDefaults(NotificationCompat.DEFAULT_SOUND or NotificationCompat.DEFAULT_VIBRATE)
             .setCategory(NotificationCompat.CATEGORY_ERROR)
             .setOnlyAlertOnce(true)
             .setAutoCancel(false)

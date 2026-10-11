@@ -71,6 +71,7 @@ internal object SafetySmsStatusNotifier {
                 )
             )
             .setPriority(if (confirmed) NotificationCompat.PRIORITY_LOW else NotificationCompat.PRIORITY_HIGH)
+            .setDefaults(if (confirmed) 0 else NotificationCompat.DEFAULT_SOUND or NotificationCompat.DEFAULT_VIBRATE)
             .setSilent(confirmed)
             .setCategory(NotificationCompat.CATEGORY_STATUS)
             .setOnlyAlertOnce(true)

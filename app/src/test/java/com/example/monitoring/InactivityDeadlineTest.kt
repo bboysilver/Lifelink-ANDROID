@@ -160,4 +160,14 @@ class InactivityDeadlineTest {
         store.recordActivity(now + 1_000L, "unlock", now + 1_000L, 1_000L)
         assertEquals(listOf("sos:1000"), manager.activeNotifications.map { it.tag })
     }
+
+    @Test
+    @Config(sdk = [24])
+    fun legacyPreAlertRequestsSoundAndVibration() = runBlocking {
+        val warningAt = store.deadlineMs - DeadlineCalculator.PRE_ALERT_SECONDS * 1_000L
+        task.run(store.deadlineMs, warningAt, warningAt - now)
+        val warning = context.getSystemService(NotificationManager::class.java).activeNotifications.single().notification
+        val alertDefaults = Notification.DEFAULT_SOUND or Notification.DEFAULT_VIBRATE
+        assertEquals(alertDefaults, warning.defaults and alertDefaults)
+    }
 }

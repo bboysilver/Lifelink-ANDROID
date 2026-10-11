@@ -119,6 +119,7 @@ internal class InactivityDeadlineTask(
                 )
             )
             .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setDefaults(NotificationCompat.DEFAULT_SOUND or NotificationCompat.DEFAULT_VIBRATE)
             .setOnlyAlertOnce(true)
             .setAutoCancel(false)
 
