@@ -8,6 +8,7 @@ import androidx.test.core.app.ApplicationProvider
 import com.example.data.MonitoringStore
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
+import org.junit.Assert.assertFalse
 import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -58,16 +59,16 @@ class MainActivityInteractionTest {
 
     @Test
     fun rapidTouchEventsAreCoalescedForOnlyOneSecond() {
-        val activity = Robolectric.buildActivity(MainActivity::class.java).get()
-        activity.onUserInteraction()
-        val deadline = store.deadlineMs
-        ShadowSystemClock.advanceBy(Duration.ofMillis(200))
-        activity.onUserInteraction()
-        assertEquals(deadline, store.deadlineMs)
+        assertTrue(ActivityInteractionPolicy.shouldRecord(-1L, 10_000L))
+        assertFalse(ActivityInteractionPolicy.shouldRecord(10_000L, 10_200L))
+        assertFalse(ActivityInteractionPolicy.shouldRecord(10_000L, 10_999L))
+        assertTrue(ActivityInteractionPolicy.shouldRecord(10_000L, 11_000L))
+        assertTrue(ActivityInteractionPolicy.shouldRecord(10_000L, 20_000L))
+    }
 
-        ShadowSystemClock.advanceBy(Duration.ofSeconds(1))
-        activity.onUserInteraction()
-        assertTrue(store.deadlineMs > deadline)
+    @Test
+    fun backwardsElapsedClockDoesNotPreventNewInteraction() {
+        assertTrue(ActivityInteractionPolicy.shouldRecord(10_000L, 1_000L))
     }
 
     @Test

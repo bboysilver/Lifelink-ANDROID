@@ -50,7 +50,7 @@ class MainActivity : ComponentActivity() {
 
     private fun recordInteraction(reason: String) {
         val elapsedMs = SystemClock.elapsedRealtime()
-        if (lastInteractionElapsedMs >= 0L && elapsedMs - lastInteractionElapsedMs in 0 until 1_000L) return
+        if (!ActivityInteractionPolicy.shouldRecord(lastInteractionElapsedMs, elapsedMs)) return
         if (monitoringStore.recordActivity(System.currentTimeMillis(), reason)) {
             lastInteractionElapsedMs = SystemClock.elapsedRealtime()
         }
@@ -74,4 +74,9 @@ class MainActivity : ComponentActivity() {
             }
         }
     }
+}
+
+internal object ActivityInteractionPolicy {
+    fun shouldRecord(lastRecordedMs: Long, nowMs: Long): Boolean =
+        lastRecordedMs < 0L || nowMs < lastRecordedMs || nowMs - lastRecordedMs >= 1_000L
 }
