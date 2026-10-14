@@ -4,6 +4,7 @@ import android.Manifest
 import android.app.Application
 import android.app.Service
 import android.app.Notification
+import android.app.NotificationManager
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
@@ -147,6 +148,18 @@ class MonitoringServiceTest {
             assertNull(notification.sound)
             assertNull(notification.vibrate)
             assertEquals(0, notification.defaults and (Notification.DEFAULT_SOUND or Notification.DEFAULT_VIBRATE))
+        } finally { controller.destroy() }
+    }
+
+    @Test
+    fun ongoingMonitoringDoesNotCreateAnUnreadBadge() {
+        prepareDailyOnlyService()
+        val controller = Robolectric.buildService(MonitoringService::class.java).create()
+        try {
+            val notification = shadowOf(controller.get()).lastForegroundNotification
+            assertEquals(SafetyNotificationCapability.MONITORING_CHANNEL_ID, notification.channelId)
+            val manager = context.getSystemService(NotificationManager::class.java)
+            assertFalse(manager.getNotificationChannel(notification.channelId).canShowBadge())
         } finally { controller.destroy() }
     }
 

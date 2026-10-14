@@ -6,6 +6,7 @@ import android.app.NotificationManager
 import android.content.Context
 import androidx.test.core.app.ApplicationProvider
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
@@ -55,6 +56,8 @@ class SafetySmsStatusNotifierTest {
         assertEquals(NotificationManager.IMPORTANCE_LOW,
             manager.getNotificationChannel(notification.channelId).importance)
         assertEquals(SafetySmsStatusNotifier.CONFIRMED_NOTIFICATION_ID, manager.activeNotifications.single().id)
+        assertFalse(manager.getNotificationChannel(notification.channelId).canShowBadge())
+        assertTrue(notification.flags and Notification.FLAG_AUTO_CANCEL != 0)
     }
 
     @Test

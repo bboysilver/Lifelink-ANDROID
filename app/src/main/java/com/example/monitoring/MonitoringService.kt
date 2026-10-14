@@ -352,7 +352,7 @@ class MonitoringService : Service() {
         false
     }
     private fun buildOngoingNotification(): android.app.Notification {
-        val builder = NotificationCompat.Builder(this, MONITORING_CHANNEL_ID)
+        val builder = NotificationCompat.Builder(this, SafetyNotificationCapability.MONITORING_CHANNEL_ID)
             .setSmallIcon(android.R.drawable.ic_dialog_info)
             .setContentTitle(
                 when {
@@ -370,6 +370,7 @@ class MonitoringService : Service() {
             .setOngoing(true)
             .setOnlyAlertOnce(true)
             .setSilent(true)
+            .setBadgeIconType(NotificationCompat.BADGE_ICON_NONE)
             .setPriority(NotificationCompat.PRIORITY_LOW)
             .setCategory(NotificationCompat.CATEGORY_SERVICE)
 
@@ -419,13 +420,8 @@ class MonitoringService : Service() {
     private fun createNotificationChannels() {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
         val manager = getSystemService(NotificationManager::class.java)
-        manager.createNotificationChannel(
-            NotificationChannel(
-                MONITORING_CHANNEL_ID,
-                "안심 모니터링",
-                NotificationManager.IMPORTANCE_LOW
-            ).apply { description = "활동 감지가 실행 중임을 표시합니다." }
-        )
+        SafetyNotificationCapability.createMonitoringChannel(this)
+        SafetyNotificationCapability.cancelLegacyConfirmedNotifications(this)
         manager.createNotificationChannel(
             NotificationChannel(
                 SafetyNotificationCapability.ALERT_CHANNEL_ID,
@@ -446,7 +442,6 @@ class MonitoringService : Service() {
         const val ACTION_TRIGGER_SOS = "com.bboysilver.lifelink.action.TRIGGER_SOS"
         const val ACTION_CANCEL_SOS = "com.bboysilver.lifelink.action.CANCEL_SOS"
         const val EXTRA_REASON = "reason"
-        private const val MONITORING_CHANNEL_ID = "lifelink_monitoring"
         private const val MONITORING_NOTIFICATION_ID = 1001
         private const val ALERT_NOTIFICATION_ID = 1002
         private const val DAILY_NOTIFICATION_ID = 1003

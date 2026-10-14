@@ -71,7 +71,8 @@ class SensorMonitor(
                 context,
                 statusReceiver,
                 IntentFilter(Intent.ACTION_USER_PRESENT),
-                ContextCompat.RECEIVER_NOT_EXPORTED
+                // USER_PRESENT is a protected system broadcast; some OEMs send it from System UI.
+                ContextCompat.RECEIVER_EXPORTED
             )
         } catch (error: RuntimeException) {
             sensorManager.unregisterListener(this)
