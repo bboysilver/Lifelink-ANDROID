@@ -149,4 +149,17 @@ class MainActivityInteractionTest {
             assertEquals("모니터링 시작", store.snapshot().lastActivityReason)
         } finally { controller.destroy() }
     }
+
+    @Test
+    fun activityRecreationAloneIsNotAnotherUserOpening() {
+        val intent = Intent(context, MainActivity::class.java).setAction(Intent.ACTION_MAIN)
+            .addCategory(Intent.CATEGORY_LAUNCHER)
+        val controller = Robolectric.buildActivity(MainActivity::class.java, intent).setup()
+        try {
+            val deadline = store.deadlineMs
+            ShadowSystemClock.advanceBy(Duration.ofSeconds(10))
+            controller.recreate()
+            assertEquals(deadline, store.deadlineMs)
+        } finally { controller.destroy() }
+    }
 }

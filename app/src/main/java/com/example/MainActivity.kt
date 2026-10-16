@@ -10,6 +10,7 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.viewModels
+import androidx.lifecycle.ViewModel
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.Surface
 import androidx.compose.ui.Modifier
@@ -26,6 +27,7 @@ class MainActivity : ComponentActivity() {
     private var observedKeyguardLocked = false
     private var pendingUserEntry = false
     private var leftByUser = false
+    private val entryState: ActivityEntryState by viewModels()
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
@@ -95,9 +97,12 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        pendingUserEntry = isUserOpenIntent(intent)
-        // Compose can start recovery immediately; explicit opening is already activity.
-        recordConfirmedEntry()
+        if (!entryState.creationHandled) {
+            entryState.creationHandled = true
+            pendingUserEntry = isUserOpenIntent(intent)
+            // Compose can start recovery immediately; explicit opening is already activity.
+            recordConfirmedEntry()
+        }
         SafetyNotificationCapability.cancelLegacyConfirmedNotifications(this)
         SafetyNotificationCapability.createAlertChannel(this)
         enableEdgeToEdge()
@@ -122,6 +127,10 @@ class MainActivity : ComponentActivity() {
             intent?.action == ACTION_USER_OPEN ||
                 (intent?.action == Intent.ACTION_MAIN && intent.hasCategory(Intent.CATEGORY_LAUNCHER))
     }
+}
+
+internal class ActivityEntryState : ViewModel() {
+    var creationHandled = false
 }
 
 internal object ActivityInteractionPolicy {
