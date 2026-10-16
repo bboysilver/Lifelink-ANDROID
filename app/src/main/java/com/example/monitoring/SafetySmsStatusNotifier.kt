@@ -1,12 +1,8 @@
 package com.example.monitoring
 
 import android.annotation.SuppressLint
-import android.app.NotificationChannel
-import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.Context
-import android.content.Intent
-import android.os.Build
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import com.example.MainActivity
@@ -46,15 +42,7 @@ internal object SafetySmsStatusNotifier {
                 body = "보호자 ${statuses.size}명 중 ${failedCount}명의 문자 발송을 확인하지 못했습니다. 직접 연락해 주세요."
             }
         }
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            appContext.getSystemService(NotificationManager::class.java).createNotificationChannel(
-                NotificationChannel(
-                    SafetyNotificationCapability.ALERT_CHANNEL_ID,
-                    "안전 확인 알림",
-                    NotificationManager.IMPORTANCE_HIGH
-                ).apply { enableVibration(true) }
-            )
-        }
+        SafetyNotificationCapability.createAlertChannel(appContext)
         if (!SafetyNotificationCapability.canPost(appContext)) return
         val confirmed = failedCount == 0
         if (confirmed) SafetyNotificationCapability.createStatusChannel(appContext)
@@ -66,14 +54,15 @@ internal object SafetySmsStatusNotifier {
             .setStyle(NotificationCompat.BigTextStyle().bigText(body))
             .setContentIntent(
                 PendingIntent.getActivity(
-                    appContext, 0, Intent(appContext, MainActivity::class.java),
+                    appContext, 0, MainActivity.openIntent(appContext),
                     PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
                 )
             )
             .setPriority(if (confirmed) NotificationCompat.PRIORITY_LOW else NotificationCompat.PRIORITY_HIGH)
             .setDefaults(if (confirmed) 0 else NotificationCompat.DEFAULT_SOUND or NotificationCompat.DEFAULT_VIBRATE)
             .setSilent(confirmed)
-            .setBadgeIconType(if (confirmed) NotificationCompat.BADGE_ICON_NONE else NotificationCompat.BADGE_ICON_SMALL)
+            .setBadgeIconType(NotificationCompat.BADGE_ICON_NONE)
+            .setNumber(0)
             .setCategory(NotificationCompat.CATEGORY_STATUS)
             .setOnlyAlertOnce(true)
             .setAutoCancel(confirmed)

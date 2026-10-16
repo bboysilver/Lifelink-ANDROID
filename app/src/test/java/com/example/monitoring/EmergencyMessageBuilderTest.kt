@@ -16,6 +16,36 @@ class EmergencyMessageBuilderTest {
     }
 
     @Test
+    fun dayLateEvaluationExplainsTheDelayRatherThanClaimingContinuousInactivity() {
+        val deadline = 1_700_000_000_000L
+        val message = EmergencyMessageBuilder.build("업무용 폰", 72, deadline - 6 * 3_600_000L, 6,
+            deadlineMs = deadline, evaluatedAtMs = deadline + 83_050_000L)
+        assertTrue(message.contains("1384분 지연 점검"))
+        assertTrue(message.contains("예정 마감:"))
+        assertTrue(message.contains("점검 시각:"))
+        assertTrue(message.contains("활동 기록이 누락됐을 수 있습니다"))
+        assertFalse(message.contains("6시간 무활동"))
+    }
+
+    @Test
+    fun fiftyTwoMinuteDelayIsNotHiddenInTheNormalMessage() {
+        val deadline = 1_700_000_000_000L
+        val message = EmergencyMessageBuilder.build("업무용 폰", 72, deadline - 6 * 3_600_000L, 6,
+            deadlineMs = deadline, evaluatedAtMs = deadline + 3_161_000L)
+        assertTrue(message.contains("52분 지연 점검"))
+        assertTrue(message.contains("6시간 마감 후 지연 점검"))
+    }
+
+    @Test
+    fun onTimeEvaluationKeepsTheCoreInactivityWarning() {
+        val deadline = 1_700_000_000_000L
+        val message = EmergencyMessageBuilder.build("업무용 폰", 72, deadline - 6 * 3_600_000L, 6,
+            deadlineMs = deadline, evaluatedAtMs = deadline + 59_999L)
+        assertTrue(message.contains("6시간 무활동"))
+        assertFalse(message.contains("지연 점검"))
+    }
+
+    @Test
     fun unknownActivityDoesNotBecome1970OrSafetyClaim() {
         val message = EmergencyMessageBuilder.build("어머니", null)
         assertTrue(message.contains("마지막 감지 활동: 기록 없음"))

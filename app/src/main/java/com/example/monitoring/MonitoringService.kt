@@ -2,8 +2,6 @@ package com.example.monitoring
 
 import android.Manifest
 import android.annotation.SuppressLint
-import android.app.NotificationChannel
-import android.app.NotificationManager
 import android.app.PendingIntent
 import android.app.Service
 import android.content.Context
@@ -18,6 +16,7 @@ import androidx.core.app.NotificationManagerCompat
 import androidx.core.app.ServiceCompat
 import androidx.core.content.ContextCompat
 import com.example.MainActivity
+import com.example.BuildConfig
 import com.example.data.AppDatabase
 import com.example.data.DailyCheckInPhase
 import com.example.data.LifeLinkRepository
@@ -46,10 +45,12 @@ class MonitoringService : Service() {
     private var lastHeartbeatWriteElapsedMs = 0L
     private var lastOngoingMode: Boolean? = null
     private var startupFailed = false
+    private var previousHeartbeatMs = 0L
 
     override fun onCreate() {
         super.onCreate()
         store = MonitoringStore(this)
+        previousHeartbeatMs = store.snapshot().lastHeartbeatMs
         val database = AppDatabase.getDatabase(this)
         repository = LifeLinkRepository(database)
         incidents = SafetyIncidentRepository(database)
@@ -205,7 +206,17 @@ class MonitoringService : Service() {
         if (monitorJob?.isActive == true) return
         monitorJob = serviceScope.launch {
             if (store.desiredEnabled) {
-                repository.insertLog("SAFETY_INIT", "백그라운드 안심 모니터링이 시작되었습니다.")
+                val nowMs = System.currentTimeMillis()
+                val previous = previousHeartbeatMs.takeIf { it > 0L }?.let {
+                    java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss", java.util.Locale.KOREA)
+                        .format(java.util.Date(it))
+                } ?: "기록 없음"
+                val gap = if (previousHeartbeatMs in 1..nowMs) {
+                    "${(nowMs - previousHeartbeatMs) / 1_000L}초"
+                } else "확인 불가"
+                repository.insertLog("SAFETY_INIT", "백그라운드 안심 모니터링이 시작되었습니다.",
+                    "앱 ${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE}), 이전 서비스 확인: $previous, " +
+                        "실행 확인 기록 공백: $gap (실제 중단 원인을 확정하는 값은 아닙니다.)")
             }
             var firstPass = true
             while (
@@ -398,6 +409,8 @@ class MonitoringService : Service() {
             .setDefaults(NotificationCompat.DEFAULT_SOUND or NotificationCompat.DEFAULT_VIBRATE)
             .setCategory(NotificationCompat.CATEGORY_ERROR)
             .setOnlyAlertOnce(true)
+            .setBadgeIconType(NotificationCompat.BADGE_ICON_NONE)
+            .setNumber(0)
             .setAutoCancel(false)
             .build()
         notifyIfAllowed(ALERT_NOTIFICATION_ID, notification)
@@ -406,7 +419,7 @@ class MonitoringService : Service() {
     private fun launchAppIntent(): PendingIntent = PendingIntent.getActivity(
         this,
         0,
-        Intent(this, MainActivity::class.java),
+        MainActivity.openIntent(this),
         PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
     )
 
@@ -418,20 +431,9 @@ class MonitoringService : Service() {
     }
 
     private fun createNotificationChannels() {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
-        val manager = getSystemService(NotificationManager::class.java)
         SafetyNotificationCapability.createMonitoringChannel(this)
         SafetyNotificationCapability.cancelLegacyConfirmedNotifications(this)
-        manager.createNotificationChannel(
-            NotificationChannel(
-                SafetyNotificationCapability.ALERT_CHANNEL_ID,
-                "안전 확인 알림",
-                NotificationManager.IMPORTANCE_HIGH
-            ).apply {
-                description = "무활동 경고, 매일 안부 확인, SOS 문자 상태를 알립니다."
-                enableVibration(true)
-            }
-        )
+        SafetyNotificationCapability.createAlertChannel(this)
     }
 
     companion object {

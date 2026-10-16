@@ -953,7 +953,7 @@ private fun PrivacyDialog(onDismiss: () -> Unit, onOpenPolicy: () -> Unit) {
         text = {
             Text(
                 "보호자 이름과 전화번호, 선택한 SIM, 설정, 매일 안부 응답, 최근 활동 시각, SOS·문자 결과와 수동 가족 확인 기록은 이 기기에만 저장됩니다. " +
-                    "긴급 시 사용자 이름, 발송 사유, 마지막 감지 활동 시각과 배터리 상태를 문자 유형에 따라 등록한 보호자에게 기기 SIM 문자로 전달합니다. " +
+                    "긴급 시 사용자 이름, 발송 사유, 마지막 감지 활동·예정 마감·점검 시각과 배터리 상태를 문자 유형에 따라 등록한 보호자에게 기기 SIM 문자로 전달합니다. " +
                     "위치, Firebase, Twilio, 광고 SDK, 광고 ID, 결제 SDK 또는 외부 클라우드는 사용하지 않습니다. " +
                     "동작·가족 확인 기록은 90일 후 정리되며 기록 삭제로 지울 수 있습니다. 앱 데이터는 기기 백업에서 제외되며 앱 삭제 시 제거됩니다.",
                 modifier = Modifier.verticalScroll(rememberScrollState())

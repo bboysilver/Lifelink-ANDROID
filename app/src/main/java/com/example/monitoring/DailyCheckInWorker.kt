@@ -2,13 +2,10 @@ package com.example.monitoring
 
 import android.Manifest
 import android.annotation.SuppressLint
-import android.app.NotificationChannel
-import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
-import android.os.Build
 import android.os.SystemClock
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
@@ -368,6 +365,8 @@ internal class DailyCheckInTask(
             .setDefaults(NotificationCompat.DEFAULT_SOUND or NotificationCompat.DEFAULT_VIBRATE)
             .setCategory(NotificationCompat.CATEGORY_REMINDER)
             .setOnlyAlertOnce(true)
+            .setBadgeIconType(NotificationCompat.BADGE_ICON_NONE)
+            .setNumber(0)
             .setSilent(silent)
             .setAutoCancel(false)
             .addAction(0, "괜찮아요", safeIntent)
@@ -389,6 +388,8 @@ internal class DailyCheckInTask(
             .setDefaults(NotificationCompat.DEFAULT_SOUND or NotificationCompat.DEFAULT_VIBRATE)
             .setCategory(NotificationCompat.CATEGORY_ERROR)
             .setOnlyAlertOnce(true)
+            .setBadgeIconType(NotificationCompat.BADGE_ICON_NONE)
+            .setNumber(0)
             .setAutoCancel(false)
             .build()
         notifyIfAllowed(ALERT_NOTIFICATION_ID, notification)
@@ -397,7 +398,7 @@ internal class DailyCheckInTask(
     private fun launchAppIntent(): PendingIntent = PendingIntent.getActivity(
         appContext,
         0,
-        Intent(appContext, MainActivity::class.java),
+        MainActivity.openIntent(appContext),
         PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
     )
 
@@ -409,17 +410,7 @@ internal class DailyCheckInTask(
     }
 
     private fun createAlertChannel() {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
-        appContext.getSystemService(NotificationManager::class.java).createNotificationChannel(
-            NotificationChannel(
-                SafetyNotificationCapability.ALERT_CHANNEL_ID,
-                "안전 확인 알림",
-                NotificationManager.IMPORTANCE_HIGH
-            ).apply {
-                description = "무활동 경고, 매일 안부 확인, SOS 문자 상태를 알립니다."
-                enableVibration(true)
-            }
-        )
+        SafetyNotificationCapability.createAlertChannel(appContext)
     }
 
     companion object {

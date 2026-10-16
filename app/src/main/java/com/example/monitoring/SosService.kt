@@ -2,8 +2,6 @@ package com.example.monitoring
 
 import android.annotation.SuppressLint
 import android.app.Notification
-import android.app.NotificationChannel
-import android.app.NotificationManager
 import android.app.PendingIntent
 import android.app.Service
 import android.content.Context
@@ -146,10 +144,12 @@ class SosService : Service() {
                 .setContentTitle(title).setContentText(body)
                 .setStyle(NotificationCompat.BigTextStyle().bigText(body))
                 .setOnlyAlertOnce(true)
+                .setBadgeIconType(NotificationCompat.BADGE_ICON_NONE)
+                .setNumber(0)
                 .setSilent(cancellable)
                 .setPriority(if (cancellable) NotificationCompat.PRIORITY_LOW else NotificationCompat.PRIORITY_HIGH)
                 .setDefaults(if (cancellable) 0 else NotificationCompat.DEFAULT_SOUND or NotificationCompat.DEFAULT_VIBRATE)
-                .setContentIntent(PendingIntent.getActivity(context, 0, Intent(context, MainActivity::class.java),
+                .setContentIntent(PendingIntent.getActivity(context, 0, MainActivity.openIntent(context),
                     PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE))
             if (cancellable) {
                 builder.setOngoing(true).addAction(0, "SOS 취소", PendingIntent.getService(
@@ -163,9 +163,7 @@ class SosService : Service() {
         }
 
         private fun createChannel(context: Context) {
-            if (Build.VERSION.SDK_INT >= 26) context.getSystemService(NotificationManager::class.java)
-                .createNotificationChannel(NotificationChannel(SafetyNotificationCapability.ALERT_CHANNEL_ID,
-                    "안전 확인 알림", NotificationManager.IMPORTANCE_HIGH).apply { enableVibration(true) })
+            SafetyNotificationCapability.createAlertChannel(context)
         }
     }
 }

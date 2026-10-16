@@ -5,13 +5,24 @@ object EmergencyMessageBuilder {
         deviceAlias: String,
         batteryPercent: Int?,
         lastActivityMs: Long = 0L,
-        monitorHours: Int? = null
+        monitorHours: Int? = null,
+        deadlineMs: Long = 0L,
+        evaluatedAtMs: Long = 0L
     ): String {
         val batteryText = batteryPercent?.let { "$it%" } ?: "확인 불가"
+        val delayMs = if (deadlineMs > 0L && evaluatedAtMs >= deadlineMs) evaluatedAtMs - deadlineMs else 0L
+        val delayed = delayMs >= 60_000L
+        val delayNotice = if (delayed) {
+            "예정 마감: ${formatTime(deadlineMs)}\n" +
+                "점검 시각: ${formatTime(evaluatedAtMs)}\n" +
+                "${delayMs / 60_000L}분 지연 점검입니다. 앱 중단·절전 등으로 활동 기록이 누락됐을 수 있습니다.\n"
+        } else ""
         return "[라이프링크 안전 알림]\n" +
-            "$deviceAlias 님의 스마트폰 활동이 설정 시간 동안 확인되지 않았습니다.\n" +
-            "발송 사유: ${monitorHours?.let { "${it}시간" } ?: "설정 시간"} 무활동\n" +
+            (if (delayed) "$deviceAlias 님의 활동 기록이 없어 늦게 안전 확인을 요청합니다.\n"
+                else "$deviceAlias 님의 스마트폰 활동이 설정 시간 동안 확인되지 않았습니다.\n") +
+            "발송 사유: ${monitorHours?.let { "${it}시간" } ?: "설정 시간"} ${if (delayed) "마감 후 지연 점검" else "무활동"}\n" +
             "마지막 감지 활동: ${formatTime(lastActivityMs)}\n" +
+            delayNotice +
             "배터리: $batteryText\n" +
             "위치 정보는 수집하지 않습니다.\n" +
             "직접 연락해 안전을 확인해 주세요."

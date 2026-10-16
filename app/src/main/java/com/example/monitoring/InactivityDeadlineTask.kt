@@ -1,14 +1,12 @@
 package com.example.monitoring
 
 import android.annotation.SuppressLint
-import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.Notification
 import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
 import android.os.BatteryManager
-import android.os.Build
 import android.os.SystemClock
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
@@ -62,7 +60,8 @@ internal class InactivityDeadlineTask(
                 occurredAtMs = eventMs,
                 message = EmergencyMessageBuilder.build(
                     store.deviceAlias, battery, snapshot.lastActivityMs,
-                    store.monitorHours.takeIf { store.debugMonitorMinutes == 0 }
+                    store.monitorHours.takeIf { store.debugMonitorMinutes == 0 },
+                    deadlineMs = deadlineMs, evaluatedAtMs = nowMs
                 ),
                 batteryPercent = battery,
                 canCreateIncident = { store.desiredEnabled && store.inactivityEventMs == eventMs }
@@ -78,7 +77,13 @@ internal class InactivityDeadlineTask(
                     "INACTIVITY_DISPATCH",
                     "${store.monitorHours}시간 무활동 경보 발송 요청",
                     "마지막 활동: ${format.format(java.util.Date(snapshot.lastActivityMs))} " +
-                        "(${snapshot.lastActivityReason}), 마감: ${format.format(java.util.Date(deadlineMs))}"
+                        "(${snapshot.lastActivityReason}), 마감: ${format.format(java.util.Date(deadlineMs))}, " +
+                        "점검: ${format.format(java.util.Date(nowMs))}, " +
+                        "마감 초과: ${(nowMs - deadlineMs).coerceAtLeast(0L) / 1_000L}초, " +
+                        "서비스 상태: ${snapshot.runtimeState}, " +
+                        "마지막 서비스 확인: ${snapshot.lastHeartbeatMs.takeIf { it > 0L }?.let {
+                            format.format(java.util.Date(it))
+                        } ?: "기록 없음"}"
                 )
                 cancelPreAlert(appContext)
             }
@@ -114,25 +119,20 @@ internal class InactivityDeadlineTask(
             .setContentText(body)
             .setContentIntent(
                 PendingIntent.getActivity(
-                    appContext, 0, Intent(appContext, MainActivity::class.java),
+                    appContext, 0, MainActivity.openIntent(appContext),
                     PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
                 )
             )
             .setPriority(NotificationCompat.PRIORITY_HIGH)
             .setDefaults(NotificationCompat.DEFAULT_SOUND or NotificationCompat.DEFAULT_VIBRATE)
             .setOnlyAlertOnce(true)
+            .setBadgeIconType(NotificationCompat.BADGE_ICON_NONE)
+            .setNumber(0)
             .setAutoCancel(false)
 
     @SuppressLint("MissingPermission")
     private fun notify(builder: NotificationCompat.Builder, id: Int = ALERT_NOTIFICATION_ID): Boolean {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            appContext.getSystemService(NotificationManager::class.java).createNotificationChannel(
-                NotificationChannel(
-                    SafetyNotificationCapability.ALERT_CHANNEL_ID, "안전 확인 알림",
-                    NotificationManager.IMPORTANCE_HIGH
-                ).apply { enableVibration(true) }
-            )
-        }
+        SafetyNotificationCapability.createAlertChannel(appContext)
         if (SafetyNotificationCapability.canPost(appContext)) {
             NotificationManagerCompat.from(appContext).notify(id, builder.build())
             return true

@@ -2,6 +2,7 @@ package com.example
 
 import android.app.Application
 import android.content.Context
+import android.content.Intent
 import android.app.KeyguardManager
 import android.os.PowerManager
 import androidx.test.core.app.ApplicationProvider
@@ -111,5 +112,41 @@ class MainActivityInteractionTest {
         activity.onWindowFocusChanged(true)
 
         assertEquals(deadline, store.deadlineMs)
+    }
+
+    @Test
+    fun explicitLauncherOpeningRecordsActivityBeforeUiCanRestoreAnExpiredDeadline() {
+        store.beginStart(nowMs = System.currentTimeMillis() - 13 * 3_600_000L,
+            elapsedRealtimeMs = -1L)
+        val expiredEvent = store.inactivityEventMs
+        val intent = Intent(context, MainActivity::class.java).setAction(Intent.ACTION_MAIN)
+            .addCategory(Intent.CATEGORY_LAUNCHER)
+        val controller = Robolectric.buildActivity(MainActivity::class.java, intent).create()
+        try {
+            assertEquals("라이프링크 직접 열기·복귀", store.snapshot().lastActivityReason)
+            assertTrue(store.deadlineMs > System.currentTimeMillis())
+            assertTrue(store.inactivityEventMs != expiredEvent)
+        } finally { controller.destroy() }
+    }
+
+    @Test
+    fun openingFromAnAppNotificationAlsoCountsWithoutAnotherTouch() {
+        val controller = Robolectric.buildActivity(MainActivity::class.java,
+            Intent(context, MainActivity::class.java).setAction(Intent.ACTION_SCREEN_ON)).create()
+        try {
+            controller.newIntent(MainActivity.openIntent(context))
+            assertEquals("라이프링크 직접 열기·복귀", store.snapshot().lastActivityReason)
+        } finally { controller.destroy() }
+    }
+
+    @Test
+    fun lockedLauncherEntryDoesNotPretendTheUserHasUnlocked() {
+        shadowOf(context.getSystemService(KeyguardManager::class.java)).setKeyguardLocked(true)
+        val intent = Intent(context, MainActivity::class.java).setAction(Intent.ACTION_MAIN)
+            .addCategory(Intent.CATEGORY_LAUNCHER)
+        val controller = Robolectric.buildActivity(MainActivity::class.java, intent).create()
+        try {
+            assertEquals("모니터링 시작", store.snapshot().lastActivityReason)
+        } finally { controller.destroy() }
     }
 }

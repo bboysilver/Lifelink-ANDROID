@@ -4,6 +4,8 @@ import android.os.Bundle
 import android.os.SystemClock
 import android.os.PowerManager
 import android.app.KeyguardManager
+import android.content.Context
+import android.content.Intent
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -22,6 +24,37 @@ class MainActivity : ComponentActivity() {
     private val monitoringStore by lazy { MonitoringStore(this) }
     private var lastInteractionElapsedMs = -1L
     private var observedKeyguardLocked = false
+    private var pendingUserEntry = false
+    private var leftByUser = false
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        pendingUserEntry = isUserOpenIntent(intent)
+        recordConfirmedEntry()
+    }
+
+    override fun onUserLeaveHint() {
+        leftByUser = true
+        super.onUserLeaveHint()
+    }
+
+    override fun onResume() {
+        // Record a user return before lifecycle observers restore an expired service.
+        recordConfirmedEntry()
+        super.onResume()
+    }
+
+    private fun recordConfirmedEntry() {
+        if (!(pendingUserEntry || leftByUser || observedKeyguardLocked) ||
+            !getSystemService(PowerManager::class.java).isInteractive ||
+            getSystemService(KeyguardManager::class.java).isKeyguardLocked
+        ) return
+        pendingUserEntry = false
+        leftByUser = false
+        observedKeyguardLocked = false
+        recordInteraction("라이프링크 직접 열기·복귀")
+    }
 
     override fun onUserInteraction() {
         super.onUserInteraction()
@@ -62,7 +95,11 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        pendingUserEntry = isUserOpenIntent(intent)
+        // Compose can start recovery immediately; explicit opening is already activity.
+        recordConfirmedEntry()
         SafetyNotificationCapability.cancelLegacyConfirmedNotifications(this)
+        SafetyNotificationCapability.createAlertChannel(this)
         enableEdgeToEdge()
         setContent {
             MyApplicationTheme {
@@ -73,6 +110,17 @@ class MainActivity : ComponentActivity() {
                 }
             }
         }
+    }
+
+    companion object {
+        const val ACTION_USER_OPEN = "com.bboysilver.lifelink.action.USER_OPEN"
+
+        fun openIntent(context: Context): Intent =
+            Intent(context, MainActivity::class.java).setAction(ACTION_USER_OPEN)
+
+        private fun isUserOpenIntent(intent: Intent?): Boolean =
+            intent?.action == ACTION_USER_OPEN ||
+                (intent?.action == Intent.ACTION_MAIN && intent.hasCategory(Intent.CATEGORY_LAUNCHER))
     }
 }
 

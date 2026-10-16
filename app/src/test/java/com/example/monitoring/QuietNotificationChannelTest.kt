@@ -68,4 +68,52 @@ class QuietNotificationChannelTest {
         assertEquals(setOf(SafetySmsStatusNotifier.NOTIFICATION_ID, InactivityDeadlineTask.PRE_ALERT_NOTIFICATION_ID),
             manager.activeNotifications.map { it.id }.toSet())
     }
+
+    @Test
+    fun allSafetyChannelsIncludingFailuresDisableBadges() {
+        SafetyNotificationCapability.createMonitoringChannel(context)
+        SafetyNotificationCapability.createStatusChannel(context)
+        SafetyNotificationCapability.createAlertChannel(context)
+        listOf(SafetyNotificationCapability.MONITORING_CHANNEL_ID,
+            SafetyNotificationCapability.STATUS_CHANNEL_ID, SafetyNotificationCapability.ALERT_CHANNEL_ID)
+            .forEach { assertFalse(manager.getNotificationChannel(it).canShowBadge()) }
+        assertEquals(NotificationManager.IMPORTANCE_HIGH,
+            manager.getNotificationChannel(SafetyNotificationCapability.ALERT_CHANNEL_ID).importance)
+    }
+
+    @Test
+    fun importantLegacyAlertsAreMovedWithoutLosingContentOrActions() {
+        val legacyId = "lifelink_safety_alerts"
+        manager.createNotificationChannel(NotificationChannel(legacyId, "legacy", NotificationManager.IMPORTANCE_HIGH)
+            .apply { setSound(null, null); enableVibration(false); setShowBadge(true) })
+        val action = android.app.PendingIntent.getActivity(context, 1, com.example.MainActivity.openIntent(context),
+            android.app.PendingIntent.FLAG_IMMUTABLE)
+        manager.notify("sos:1", 1002, NotificationCompat.Builder(context, legacyId)
+            .setSmallIcon(android.R.drawable.ic_dialog_alert)
+            .setContentTitle("SOS 문자 발송 확인 필요").setContentText("직접 연락해 주세요.")
+            .addAction(0, "앱 열기", action).build())
+
+        SafetyNotificationCapability.createAlertChannel(context)
+
+        val moved = manager.activeNotifications.single()
+        assertEquals("sos:1", moved.tag)
+        assertEquals(1002, moved.id)
+        assertEquals(SafetyNotificationCapability.ALERT_CHANNEL_ID, moved.notification.channelId)
+        assertEquals("SOS 문자 발송 확인 필요", moved.notification.extras.getString(android.app.Notification.EXTRA_TITLE))
+        assertEquals(1, moved.notification.actions.size)
+        val channel = manager.getNotificationChannel(moved.notification.channelId)
+        assertFalse(channel.canShowBadge())
+        assertFalse(channel.shouldVibrate())
+        org.junit.Assert.assertNull(channel.sound)
+    }
+
+    @Test
+    fun blockedLegacySafetyChannelRemainsBlockedBeforeAndAfterMigration() {
+        manager.createNotificationChannel(NotificationChannel("lifelink_safety_alerts", "blocked", NotificationManager.IMPORTANCE_NONE))
+        assertFalse(SafetyNotificationCapability.canPost(context))
+        SafetyNotificationCapability.createAlertChannel(context)
+        assertFalse(SafetyNotificationCapability.canPost(context))
+        assertEquals(NotificationManager.IMPORTANCE_NONE,
+            manager.getNotificationChannel(SafetyNotificationCapability.ALERT_CHANNEL_ID).importance)
+    }
 }

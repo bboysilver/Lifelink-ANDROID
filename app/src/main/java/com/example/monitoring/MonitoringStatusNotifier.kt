@@ -1,12 +1,9 @@
 package com.example.monitoring
 
 import android.annotation.SuppressLint
-import android.app.NotificationChannel
-import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
-import android.os.Build
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import com.example.MainActivity
@@ -42,7 +39,7 @@ object MonitoringStatusNotifier {
         val openApp = PendingIntent.getActivity(
             context,
             NOTIFICATION_ID,
-            Intent(context, MainActivity::class.java)
+            MainActivity.openIntent(context)
                 .addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP),
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
@@ -59,6 +56,8 @@ object MonitoringStatusNotifier {
             .setDefaults(NotificationCompat.DEFAULT_SOUND or NotificationCompat.DEFAULT_VIBRATE)
             .setCategory(NotificationCompat.CATEGORY_ERROR)
             .setOnlyAlertOnce(true)
+            .setBadgeIconType(NotificationCompat.BADGE_ICON_NONE)
+            .setNumber(0)
             .setAutoCancel(false)
             .addAction(0, "앱 열기", openApp)
             .build()
@@ -67,16 +66,6 @@ object MonitoringStatusNotifier {
     }
 
     private fun createChannel(context: Context) {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
-        context.getSystemService(NotificationManager::class.java).createNotificationChannel(
-            NotificationChannel(
-                SafetyNotificationCapability.ALERT_CHANNEL_ID,
-                "안전 확인 알림",
-                NotificationManager.IMPORTANCE_HIGH
-            ).apply {
-                description = "무활동 경고와 모니터링 중단 등 즉시 확인할 안전 상태를 알립니다."
-                enableVibration(true)
-            }
-        )
+        SafetyNotificationCapability.createAlertChannel(context)
     }
 }
