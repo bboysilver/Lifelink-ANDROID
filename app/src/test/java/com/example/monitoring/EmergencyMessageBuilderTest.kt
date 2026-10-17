@@ -6,6 +6,13 @@ import org.junit.Test
 
 class EmergencyMessageBuilderTest {
     @Test
+    fun guardianIsToldNotToWaitForAnotherPeriodicWarning() {
+        val message = EmergencyMessageBuilder.build("사용자", 72, 1_700_000_000_000L, 6)
+        assertTrue(message.contains("같은 무활동 경고를 설정 시간마다 반복하지 않습니다"))
+        assertTrue(message.contains("추가 문자를 기다리지 말고 지금 직접 연락"))
+    }
+
+    @Test
     fun inactivityMessageHasCauseAndRealLastActivityTime() {
         val timestamp = 1_700_000_000_000L
         val expectedTime = java.text.SimpleDateFormat("yyyy-MM-dd HH:mm z", java.util.Locale.KOREA)

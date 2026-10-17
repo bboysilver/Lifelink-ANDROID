@@ -3,6 +3,8 @@ package com.example.ui
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.platform.LocalDensity
@@ -12,6 +14,7 @@ import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
@@ -57,6 +60,21 @@ class SafetyToolsUiTest {
         composeRule.onNodeWithTag("simple_home_switch").assertIsDisplayed().performClick()
         composeRule.onNodeWithTag("open_diagnostics").assertIsDisplayed().assertIsEnabled().performClick()
         composeRule.runOnIdle { assertTrue(enabled && checked) }
+    }
+
+    @Test fun postAlertGuidanceIsReadableWithoutAFalseZeroCountdown() {
+        composeRule.setContent {
+            CompositionLocalProvider(LocalDensity provides Density(1f, 2f)) {
+                MaterialTheme {
+                    Column(Modifier.verticalScroll(rememberScrollState()).padding(20.dp)) {
+                        InactivityCycleNotice(InactivityAlertNotice("활동 대기", "보호자의 안부 확인을 뜻하지 않습니다."))
+                    }
+                }
+            }
+        }
+        composeRule.onNodeWithText("보호자의 안부 확인을 뜻하지 않습니다.").assertIsDisplayed()
+        composeRule.onNodeWithText(INACTIVITY_CYCLE_GUIDANCE).performScrollTo().assertIsDisplayed()
+        composeRule.onNodeWithTag("remaining_time_text").assertDoesNotExist()
     }
 
     @Test fun diagnosticDialogCanCloseAtTwoHundredPercentText() {

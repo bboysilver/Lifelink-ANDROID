@@ -284,6 +284,8 @@ internal fun DashboardTab(
     val simpleHome by viewModel.simpleHomeEnabled.collectAsState()
     val diagnostics by viewModel.diagnostics.collectAsState()
     val lastSmsSentAt by viewModel.lastSmsSentAt.collectAsState()
+    val safetyReviews by viewModel.safetyReviews.collectAsState()
+    val inactivityNotice = inactivityAlertNotice(diagnostics.snapshot, safetyReviews)
     val smsReady = smsSetupState is SmsSetupState.Ready
     val monitoringActive = isMonitoring || runtimeState == MonitoringRuntimeState.STARTING
     val monitoringBlockReason = SafetyReadiness.monitoringBlockReason(
@@ -413,7 +415,7 @@ internal fun DashboardTab(
                             runtimeState == MonitoringRuntimeState.ERROR -> "모니터링 중단됨"
                             !monitoringActive -> "모니터링 중단됨"
                             alertState == 1 -> "안전 확인 대기 중"
-                            alertState == 2 -> "긴급 문자 결과 확인 필요"
+                            alertState == 2 -> inactivityNotice?.headline ?: "긴급 문자 결과 확인 필요"
                             isMonitoring -> "정상 모니터링 중"
                             else -> "모니터링 중단됨"
                         },
@@ -445,16 +447,23 @@ internal fun DashboardTab(
                     }
                     if (monitoringActive) {
                         Spacer(Modifier.height(12.dp))
-                        Text("다음 안전 확인까지", color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        if (simpleHome) SimpleRemainingTime(remainingSeconds) else Text(
-                            formatRemaining(remainingSeconds),
-                            fontSize = 42.sp,
-                            fontFamily = FontFamily.Monospace,
-                            fontWeight = FontWeight.Black,
-                            modifier = Modifier.testTag("remaining_time_text")
-                        )
+                        if (inactivityNotice != null) {
+                            InactivityCycleNotice(inactivityNotice)
+                        } else {
+                            Text("무활동 경고까지", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            if (simpleHome) SimpleRemainingTime(remainingSeconds) else Text(
+                                formatRemaining(remainingSeconds),
+                                fontSize = 42.sp,
+                                fontFamily = FontFamily.Monospace,
+                                fontWeight = FontWeight.Black,
+                                modifier = Modifier.testTag("remaining_time_text")
+                            )
+                        }
                         Text("마지막 활동: $lastActivity", maxLines = 2, overflow = TextOverflow.Ellipsis)
                         Text("휴대전화를 사용해도 시간이 갱신되지 않으면 '무사합니다'를 눌러 주세요.", fontSize = 14.sp)
+                    }
+                    if (!monitoringActive && inactivityNotice != null) {
+                        InactivityCycleNotice(inactivityNotice)
                     }
                 }
             }
@@ -580,6 +589,7 @@ internal fun DashboardTab(
                             )
                         }
                     }
+                    Text(INACTIVITY_CYCLE_GUIDANCE, fontSize = 16.sp)
                     TextButton(onClick = openSetup) { Text("초기 안전 설정 다시 하기") }
                 }
             }

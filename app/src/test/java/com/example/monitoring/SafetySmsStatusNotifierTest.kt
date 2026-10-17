@@ -48,7 +48,10 @@ class SafetySmsStatusNotifierTest {
 
         val notification = checkNotNull(notification())
         assertEquals("긴급 문자 발송 확인", notification.extras.getString(Notification.EXTRA_TITLE))
-        assertEquals("모든 보호자 문자 발송이 확인되었습니다.", notification.extras.getString(Notification.EXTRA_TEXT))
+        val body = notification.extras.getString(Notification.EXTRA_TEXT)!!
+        assertTrue(body.startsWith("모든 보호자 문자 발송이 확인되었습니다."))
+        assertTrue(body.contains("같은 무활동 경고는 새로 반복하지 않습니다"))
+        assertTrue(body.contains("보호자의 안부 확인을 뜻하지 않습니다"))
         assertTrue(notification.flags and Notification.FLAG_ONLY_ALERT_ONCE != 0)
         assertEquals(SafetyNotificationCapability.STATUS_CHANNEL_ID, notification.channelId)
         assertNull(notification.sound)

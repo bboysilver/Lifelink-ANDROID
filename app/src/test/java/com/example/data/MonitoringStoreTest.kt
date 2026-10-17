@@ -310,6 +310,34 @@ class MonitoringStoreTest {
     }
 
     @Test
+    fun handledAlertWaitsForRealActivityInsteadOfRearmingEverySixHours() {
+        val store = MonitoringStore(context)
+        store.monitorHours = 6
+        store.beginStart(nowMs = 10_000L, elapsedRealtimeMs = 0L)
+        val deadline = store.deadlineMs
+        val event = store.inactivityEventMs
+        assertTrue(store.markEmergency(event))
+        assertFalse(store.markEmergency(event))
+
+        val muchLater = deadline + 12 * 3_600_000L
+        val restored = MonitoringStore(context)
+        val waiting = restored.snapshot(muchLater)
+        assertTrue(waiting.desiredEnabled)
+        assertTrue(waiting.inactivityAlertHandled)
+        assertEquals(0L, waiting.remainingSeconds)
+        assertEquals(deadline, waiting.deadlineMs)
+        assertEquals(event, waiting.inactivityEventMs)
+        assertEquals(10_000L, waiting.lastActivityMs)
+
+        assertTrue(restored.recordActivity(muchLater, "unlock", muchLater, muchLater - 10_000L))
+        val active = restored.snapshot(muchLater)
+        assertFalse(active.inactivityAlertHandled)
+        assertEquals(6 * 3_600L, active.remainingSeconds)
+        assertEquals(muchLater + 6 * 3_600_000L, active.deadlineMs)
+        assertTrue(active.inactivityEventMs != event)
+    }
+
+    @Test
     fun dailyCheckInStartsAtTheNextFutureOccurrenceAndSurvivesRecreation() {
         val nowMs = 1_721_659_200_000L
 

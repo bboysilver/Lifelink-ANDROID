@@ -25,7 +25,8 @@ object EmergencyMessageBuilder {
             delayNotice +
             "배터리: $batteryText\n" +
             "위치 정보는 수집하지 않습니다.\n" +
-            "직접 연락해 안전을 확인해 주세요."
+            "같은 무활동 경고를 설정 시간마다 반복하지 않습니다.\n" +
+            "추가 문자를 기다리지 말고 지금 직접 연락해 안전을 확인해 주세요."
     }
 
     fun buildSos(deviceAlias: String, requestedAtMs: Long): String {

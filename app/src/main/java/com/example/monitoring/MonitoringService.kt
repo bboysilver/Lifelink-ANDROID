@@ -43,7 +43,7 @@ class MonitoringService : Service() {
     private var monitorJob: Job? = null
     private var lastMaintenanceMs = 0L
     private var lastHeartbeatWriteElapsedMs = 0L
-    private var lastOngoingMode: Boolean? = null
+    private var lastOngoingMode: Pair<Boolean, Boolean>? = null
     private var startupFailed = false
     private var previousHeartbeatMs = 0L
 
@@ -347,7 +347,6 @@ class MonitoringService : Service() {
                 0
             }
         )
-        lastOngoingMode = store.desiredEnabled
         true
     } catch (error: RuntimeException) {
         val message = error.message ?: "포그라운드 서비스를 시작하지 못했습니다."
@@ -362,34 +361,45 @@ class MonitoringService : Service() {
         }
         false
     }
+    private fun ongoingMode(): Pair<Boolean, Boolean> {
+        val snapshot = store.snapshot()
+        return snapshot.desiredEnabled to
+            (snapshot.desiredEnabled && snapshot.deadlineMs > 0L && snapshot.remainingSeconds == 0L)
+    }
+
     private fun buildOngoingNotification(): android.app.Notification {
+        val mode = ongoingMode()
+        lastOngoingMode = mode
+        val (monitoring, awaitingActivity) = mode
+        val body = when {
+            awaitingActivity -> "문자 결과는 기록에서 확인해 주세요. 같은 경고는 반복하지 않으며, 새 활동 후 설정 시간을 다시 셉니다."
+            monitoring -> "휴대전화 활동을 자동으로 확인합니다. 앱을 열지 않아도 됩니다."
+            else -> "안부 확인 상태를 처리하고 있습니다."
+        }
         val builder = NotificationCompat.Builder(this, SafetyNotificationCapability.MONITORING_CHANNEL_ID)
             .setSmallIcon(android.R.drawable.ic_dialog_info)
             .setContentTitle(
                 when {
-                    store.desiredEnabled -> "라이프링크 안심 모니터링 중"
+                    awaitingActivity -> "라이프링크 · 활동 확인 대기"
+                    monitoring -> "라이프링크 안심 모니터링 중"
                     else -> "매일 안부 확인 처리 중"
                 }
             )
-            .setContentText(
-                when {
-                    store.desiredEnabled -> "휴대전화 활동을 자동으로 확인합니다. 앱을 열지 않아도 됩니다."
-                    else -> "안부 확인 상태를 처리하고 있습니다."
-                }
-            )
+            .setContentText(body)
+            .setStyle(NotificationCompat.BigTextStyle().bigText(body))
             .setContentIntent(launchAppIntent())
             .setOngoing(true)
             .setOnlyAlertOnce(true)
             .setSilent(true)
             .setBadgeIconType(NotificationCompat.BADGE_ICON_NONE)
+            .setNumber(0)
             .setPriority(NotificationCompat.PRIORITY_LOW)
             .setCategory(NotificationCompat.CATEGORY_SERVICE)
 
         return builder.build()
     }
     private fun updateOngoingNotification() {
-        if (lastOngoingMode == store.desiredEnabled) return
-        lastOngoingMode = store.desiredEnabled
+        if (lastOngoingMode == ongoingMode()) return
         notifyIfAllowed(MONITORING_NOTIFICATION_ID, buildOngoingNotification())
     }
 

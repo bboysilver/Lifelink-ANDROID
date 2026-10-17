@@ -67,7 +67,10 @@ internal class InactivityDeadlineTask(
                 canCreateIncident = { store.desiredEnabled && store.inactivityEventMs == eventMs }
             )
             if (batch != null && batch.statuses.all { it.isResolved }) {
-                store.markEmergency(eventMs)
+                if (store.markEmergency(eventMs)) {
+                    repository.insertLog("INACTIVITY_CYCLE_CLOSED", "무활동 경고 처리 후 새 활동 확인을 기다립니다.",
+                        "같은 무활동 경고는 새로 반복하지 않습니다. 새 활동이 확인되어야 다음 설정 시간을 계산합니다. 발송 성공 여부는 문자 결과 기록을 확인해 주세요.")
+                }
                 cancelPreAlert(appContext)
                 SafetySmsStatusNotifier.showCompletion(appContext, SafetySmsEventType.EMERGENCY, batch.statuses,
                     "${SafetySmsEventType.EMERGENCY.wireName}:$eventMs")

@@ -46,12 +46,15 @@ internal object SafetySmsStatusNotifier {
         if (!SafetyNotificationCapability.canPost(appContext)) return
         val confirmed = failedCount == 0
         if (confirmed) SafetyNotificationCapability.createStatusChannel(appContext)
+        val guidance = if (type == SafetySmsEventType.EMERGENCY) {
+            " 같은 무활동 경고는 새로 반복하지 않습니다. 문자 발송은 보호자의 안부 확인을 뜻하지 않습니다."
+        } else ""
         val notification = NotificationCompat.Builder(appContext,
             if (confirmed) SafetyNotificationCapability.STATUS_CHANNEL_ID else SafetyNotificationCapability.ALERT_CHANNEL_ID)
             .setSmallIcon(android.R.drawable.ic_dialog_alert)
             .setContentTitle(title)
-            .setContentText(body)
-            .setStyle(NotificationCompat.BigTextStyle().bigText(body))
+            .setContentText(body + guidance)
+            .setStyle(NotificationCompat.BigTextStyle().bigText(body + guidance))
             .setContentIntent(
                 PendingIntent.getActivity(
                     appContext, 0, MainActivity.openIntent(appContext),

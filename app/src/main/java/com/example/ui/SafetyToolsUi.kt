@@ -62,6 +62,14 @@ internal fun SimpleRemainingTime(seconds: Long) {
 }
 
 @Composable
+internal fun InactivityCycleNotice(notice: InactivityAlertNotice) {
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.testTag("inactivity_cycle_notice")) {
+        Text(notice.result, fontSize = 18.sp)
+        Text(INACTIVITY_CYCLE_GUIDANCE, fontSize = 16.sp)
+    }
+}
+
+@Composable
 internal fun SafetyToolsCard(
     simpleHome: Boolean,
     onSimpleHomeChanged: (Boolean) -> Unit,

@@ -163,6 +163,24 @@ class MonitoringServiceTest {
         } finally { controller.destroy() }
     }
 
+    @Test
+    fun expiredCycleNotificationWaitsForActivityInsteadOfImplyingAnotherCountdown() {
+        configureSms()
+        store.completeSetup()
+        store.monitorHours = 6
+        store.beginStart(System.currentTimeMillis() - 7 * 3_600_000L, elapsedRealtimeMs = -1L)
+        val sensors = context.getSystemService(SensorManager::class.java)
+        shadowOf(sensors).addSensor(ShadowSensor.newInstance(Sensor.TYPE_ACCELEROMETER))
+        val controller = Robolectric.buildService(MonitoringService::class.java).create()
+        try {
+            val notification = shadowOf(controller.get()).lastForegroundNotification
+            assertEquals("라이프링크 · 활동 확인 대기", notification.extras.getString(Notification.EXTRA_TITLE))
+            assertTrue(notification.extras.getString(Notification.EXTRA_TEXT)!!.contains("새 활동 후 설정 시간을 다시"))
+            assertFalse(context.getSystemService(NotificationManager::class.java)
+                .getNotificationChannel(notification.channelId).canShowBadge())
+        } finally { controller.destroy() }
+    }
+
     private fun configureSms() {
         shadowOf(context).grantPermissions(
             Manifest.permission.SEND_SMS,

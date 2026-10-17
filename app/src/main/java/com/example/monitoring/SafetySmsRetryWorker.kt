@@ -14,6 +14,7 @@ import androidx.work.WorkManager
 import androidx.work.WorkerParameters
 import com.example.data.AppDatabase
 import com.example.data.Contact
+import com.example.data.LifeLinkRepository
 import com.example.data.MonitoringStore
 import com.example.data.TestSmsVerificationState
 import com.example.data.SafetyIncidentRepository
@@ -120,6 +121,7 @@ internal class SafetySmsRetryTask(
     )
 ) {
     private val appContext = context.applicationContext
+    private val repository = LifeLinkRepository(AppDatabase.getDatabase(appContext))
 
     suspend fun pendingEventIds(): List<String> =
         incidents.pendingRecipients().map(SafetyRecipient::eventId)
@@ -221,7 +223,12 @@ internal class SafetySmsRetryTask(
         }
 
         when (event.type) {
-            SafetySmsEventType.EMERGENCY -> store.markEmergency(event.occurredAtMs)
+            SafetySmsEventType.EMERGENCY -> {
+                if (store.markEmergency(event.occurredAtMs)) {
+                    repository.insertLog("INACTIVITY_CYCLE_CLOSED", "무활동 경고 처리 후 새 활동 확인을 기다립니다.",
+                        "같은 무활동 경고는 새로 반복하지 않습니다. 새 활동이 확인되어야 다음 설정 시간을 계산합니다. 발송 성공 여부는 문자 결과 기록을 확인해 주세요.")
+                }
+            }
             SafetySmsEventType.SOS -> store.completeActiveSos(event.occurredAtMs)
             SafetySmsEventType.DAILY -> {
                 if (store.dailyNextDueAtMs == event.occurredAtMs) {

@@ -32,7 +32,10 @@ data class MonitoringSnapshot(
     val lastActivityMs: Long,
     val lastActivityReason: String,
     val lastHeartbeatMs: Long,
-    val deviceAlias: String
+    val deviceAlias: String,
+    val inactivityEventMs: Long = deadlineMs,
+    // Handled includes exhausted failures, not just successful SMS sends.
+    val inactivityAlertHandled: Boolean = false
 ) {
     val isRunning: Boolean
         get() = runtimeState == MonitoringRuntimeState.RUNNING
@@ -645,9 +648,11 @@ class MonitoringStore(context: Context) {
         true
     }
 
-    fun markEmergency(eventMs: Long) = synchronized(ACTIVITY_LOCK) {
-        if (inactivityEventMs != eventMs) return@synchronized
+    fun markEmergency(eventMs: Long): Boolean = synchronized(ACTIVITY_LOCK) {
+        if (inactivityEventMs != eventMs || wasEmergencyDispatched(eventMs)) return@synchronized false
         preferences.edit().putLong(KEY_EMERGENCY_DEADLINE_MS, eventMs).apply()
+        InactivityDeadlineScheduler(appContext).cancel()
+        true
     }
 
     fun wasPreAlerted(deadlineMs: Long): Boolean =
@@ -698,7 +703,9 @@ class MonitoringStore(context: Context) {
             lastActivityReason = preferences.getString(KEY_LAST_ACTIVITY_REASON, "활동 기록 없음")
                 ?: "활동 기록 없음",
             lastHeartbeatMs = heartbeatMs,
-            deviceAlias = deviceAlias
+            deviceAlias = deviceAlias,
+            inactivityEventMs = inactivityEventMs,
+            inactivityAlertHandled = wasEmergencyDispatched(inactivityEventMs)
         )
     }
 

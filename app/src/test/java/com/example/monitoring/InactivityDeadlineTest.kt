@@ -102,6 +102,28 @@ class InactivityDeadlineTest {
         assertTrue(store.wasEmergencyDispatched(deadline))
         assertEquals(1, dispatch.status(eventId).attempt)
         assertNotNull(incidents.get("emergency:$deadline")!!.incident.completedAtMs)
+        task.run(deadline, deadline + 6 * 3_600_000L, deadline + 6 * 3_600_000L - now)
+        task.run(deadline, deadline + 12 * 3_600_000L, deadline + 12 * 3_600_000L - now)
+        assertEquals(1, dispatch.status(eventId).attempt)
+        assertEquals(deadline, store.deadlineMs)
+        assertEquals(now, store.snapshot().lastActivityMs)
+        assertNull(incidents.get("emergency:${deadline + 6 * 3_600_000L}"))
+        assertTrue(store.snapshot(deadline + 12 * 3_600_000L).inactivityAlertHandled)
+    }
+
+    @Test
+    fun completedAlarmIsCancelledAndOnlyNewActivitySchedulesTheNextCycle() {
+        val scheduler = InactivityDeadlineScheduler(context)
+        val alarms = shadowOf(context.getSystemService(AlarmManager::class.java))
+        scheduler.ensureScheduled(now)
+        assertFalse(alarms.scheduledAlarms.isEmpty())
+        store.markEmergency(store.inactivityEventMs)
+        assertTrue(alarms.scheduledAlarms.isEmpty())
+        scheduler.ensureScheduled(store.deadlineMs + 6 * 3_600_000L)
+        assertTrue(alarms.scheduledAlarms.isEmpty())
+        assertTrue(store.recordActivity(now + 1_000L, "unlock", now + 1_000L, 1_000L))
+        assertFalse(alarms.scheduledAlarms.isEmpty())
+        assertFalse(store.snapshot(now + 1_000L).inactivityAlertHandled)
     }
 
     @Test
