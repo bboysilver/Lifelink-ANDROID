@@ -9,7 +9,9 @@ internal fun inactivityAlertNotice(
     snapshot: MonitoringSnapshot,
     reviews: List<SafetyReviewItem>
 ): InactivityAlertNotice? {
-    if (!snapshot.desiredEnabled || snapshot.deadlineMs <= 0L || snapshot.remainingSeconds > 0L) return null
+    if (!snapshot.desiredEnabled || snapshot.deadlineMs <= 0L ||
+        (snapshot.remainingSeconds > 0L && !snapshot.inactivityAlertHandled)
+    ) return null
     val review = reviews.firstOrNull { it.incidentId == "emergency:${snapshot.inactivityEventMs}" }
     val sent = review?.sentRecipients ?: 0
     val total = review?.totalRecipients ?: 0

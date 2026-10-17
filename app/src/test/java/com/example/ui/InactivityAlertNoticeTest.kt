@@ -53,4 +53,11 @@ class InactivityAlertNoticeTest {
         val notice = inactivityAlertNotice(snapshot.copy(deadlineMs = 3_601_000L), listOf(review(2)))!!
         assertEquals("문자 발송 확인 · 활동 대기", notice.headline)
     }
+
+    @Test fun handledCycleDoesNotBecomeANewCountdownAfterABackwardsClockChange() {
+        val notice = inactivityAlertNotice(
+            snapshot.copy(remainingSeconds = 3_600L, inactivityAlertHandled = true), listOf(review(2))
+        )!!
+        assertEquals("문자 발송 확인 · 활동 대기", notice.headline)
+    }
 }

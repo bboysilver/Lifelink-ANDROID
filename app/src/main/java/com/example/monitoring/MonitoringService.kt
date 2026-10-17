@@ -364,7 +364,8 @@ class MonitoringService : Service() {
     private fun ongoingMode(): Pair<Boolean, Boolean> {
         val snapshot = store.snapshot()
         return snapshot.desiredEnabled to
-            (snapshot.desiredEnabled && snapshot.deadlineMs > 0L && snapshot.remainingSeconds == 0L)
+            (snapshot.desiredEnabled && snapshot.deadlineMs > 0L &&
+                (snapshot.remainingSeconds == 0L || snapshot.inactivityAlertHandled))
     }
 
     private fun buildOngoingNotification(): android.app.Notification {

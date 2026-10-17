@@ -181,6 +181,21 @@ class MonitoringServiceTest {
         } finally { controller.destroy() }
     }
 
+    @Test
+    fun completedCycleStaysWaitingEvenIfItsWallClockDeadlineLooksFuture() {
+        configureSms()
+        store.completeSetup()
+        store.beginStart(System.currentTimeMillis(), elapsedRealtimeMs = -1L)
+        store.markEmergency(store.inactivityEventMs)
+        val sensors = context.getSystemService(SensorManager::class.java)
+        shadowOf(sensors).addSensor(ShadowSensor.newInstance(Sensor.TYPE_ACCELEROMETER))
+        val controller = Robolectric.buildService(MonitoringService::class.java).create()
+        try {
+            assertEquals("라이프링크 · 활동 확인 대기",
+                shadowOf(controller.get()).lastForegroundNotification.extras.getString(Notification.EXTRA_TITLE))
+        } finally { controller.destroy() }
+    }
+
     private fun configureSms() {
         shadowOf(context).grantPermissions(
             Manifest.permission.SEND_SMS,
