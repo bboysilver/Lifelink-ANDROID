@@ -28,6 +28,8 @@ android {
   defaultConfig {
     applicationId = "com.bboysilver.lifelink"
     minSdk = 24
+    // Keep the tested behavior contract; raising target API needs separate device validation.
+    //noinspection OldTargetApi
     targetSdk = 36
     versionCode = 44
     versionName = "2.3.6"
