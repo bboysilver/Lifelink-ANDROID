@@ -62,6 +62,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -243,7 +244,8 @@ fun LifeLinkApp(viewModel: LifeLinkViewModel) {
                     requestNotificationPermission = {
                         requestNotificationAccess()
                     },
-                    openSetup = viewModel::restartSetup
+                    openSetup = viewModel::restartSetup,
+                    onOpenContacts = { selectedTab = 1 }
                 )
                 1 -> ContactsTab(viewModel)
                 else -> LogsTab(viewModel)
@@ -261,7 +263,8 @@ internal fun DashboardTab(
     requestPhonePermission: () -> Unit,
     requestActivityPermission: () -> Unit,
     requestNotificationPermission: () -> Unit,
-    openSetup: () -> Unit
+    openSetup: () -> Unit,
+    onOpenContacts: () -> Unit = {}
 ) {
     val permissionsReady = permissions.allGranted
     val remainingSeconds by viewModel.remainingSeconds.collectAsState()
@@ -285,6 +288,8 @@ internal fun DashboardTab(
     val diagnostics by viewModel.diagnostics.collectAsState()
     val lastSmsSentAt by viewModel.lastSmsSentAt.collectAsState()
     val safetyReviews by viewModel.safetyReviews.collectAsState()
+    val actualSmsObservation by viewModel.actualSmsObservation.collectAsState()
+    val testSmsObservation by viewModel.testSmsObservation.collectAsState()
     val inactivityNotice = inactivityAlertNotice(diagnostics.snapshot, safetyReviews)
     val smsReady = smsSetupState is SmsSetupState.Ready
     val monitoringActive = isMonitoring || runtimeState == MonitoringRuntimeState.STARTING
@@ -305,6 +310,16 @@ internal fun DashboardTab(
     val canStart = permissionsReady && smsReady && monitoringBlockReason == null
     var confirmStop by remember { mutableStateOf(false) }
     var showDiagnostics by remember { mutableStateOf(false) }
+    var showFieldVisit by rememberSaveable { mutableStateOf(false) }
+
+    if (showFieldVisit) {
+        FieldVisitCheckScreen(
+            report = FieldVisitReport(diagnostics, smsSetupState, contacts.size, actualSmsObservation, testSmsObservation),
+            onRefresh = viewModel::refreshSmsSetup,
+            onOpenContacts = onOpenContacts,
+            onDismiss = { showFieldVisit = false }
+        )
+    }
 
     if (showDiagnostics) {
         SafetyDiagnosticsDialog(
@@ -316,7 +331,8 @@ internal fun DashboardTab(
                 showDiagnostics = false
                 openSetup()
             },
-            onDismiss = { showDiagnostics = false }
+            onDismiss = { showDiagnostics = false },
+            onOpenFieldVisit = { showDiagnostics = false; showFieldVisit = true }
         )
     }
 
@@ -795,6 +811,9 @@ private fun LogsTab(viewModel: LifeLinkViewModel) {
     val uriHandler = LocalUriHandler.current
     var showPrivacy by remember { mutableStateOf(false) }
     var showFamilyReviews by remember { mutableStateOf(false) }
+    var familyFilterName by rememberSaveable { mutableStateOf(FamilyReviewFilter.ALL.name) }
+    val familyFilter = FamilyReviewFilter.valueOf(familyFilterName)
+    val filteredReviews = filterSafetyReviews(reviews, familyFilter)
     var pendingFollowUp by remember { mutableStateOf<Pair<SafetyReviewItem, FamilyFollowUpStatus>?>(null) }
 
     pendingFollowUp?.let { (incident, status) ->
@@ -854,11 +873,22 @@ private fun LogsTab(viewModel: LifeLinkViewModel) {
         }
         if (showFamilyReviews) {
             item {
-                Text("이 기기에서 가족과 직접 확인한 내용을 기록합니다. 문자 수신이나 열람을 자동 확인하는 기능이 아닙니다.")
+                Text("이 단말에 기록한 메모입니다. 원격 보호자의 응답이나 문자 수신·열람을 자동 확인한 결과가 아닙니다.")
                 Text("가족 확인 기록은 90일 후 정리됩니다. 진행 중인 문자 발송은 기록 삭제로 취소되지 않습니다.")
-                if (reviews.isEmpty()) Text("아직 보호자 문자 발송을 시도한 사건이 없습니다.")
+                Text("최근 20건 · 사건 발생 시각 최신순")
+                LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    items(FamilyReviewFilter.entries) { filter ->
+                        FilterChip(
+                            selected = familyFilter == filter,
+                            onClick = { familyFilterName = filter.name },
+                            label = { Text(filter.label) },
+                            modifier = Modifier.heightIn(min = 48.dp).testTag("family_filter_${filter.name}")
+                        )
+                    }
+                }
+                if (filteredReviews.isEmpty()) Text(if (reviews.isEmpty()) "아직 보호자 문자 발송을 시도한 사건이 없습니다." else "이 상태의 기록이 없습니다.")
             }
-            items(reviews, key = { "review:${it.incidentId}" }) { review ->
+            items(filteredReviews, key = { "review:${it.incidentId}" }) { review ->
                 FamilyReviewCard(review) { status -> pendingFollowUp = review to status }
             }
         } else {
@@ -965,6 +995,7 @@ private fun PrivacyDialog(onDismiss: () -> Unit, onOpenPolicy: () -> Unit) {
                 "보호자 이름과 전화번호, 선택한 SIM, 설정, 매일 안부 응답, 최근 활동 시각, SOS·문자 결과와 수동 가족 확인 기록은 이 기기에만 저장됩니다. " +
                     "긴급 시 사용자 이름, 발송 사유, 마지막 감지 활동·예정 마감·점검 시각과 배터리 상태를 문자 유형에 따라 등록한 보호자에게 기기 SIM 문자로 전달합니다. " +
                     "위치, Firebase, Twilio, 광고 SDK, 광고 ID, 결제 SDK 또는 외부 클라우드는 사용하지 않습니다. " +
+                    "현장 점검 요약은 미리보기와 별도 동의 후 사용자가 선택한 외부 앱으로만 수동 공유할 수 있습니다. 이름·전화번호·정확한 활동 이력·문자 본문은 제외하고 임시 점검 별칭은 선택한 경우에만 포함합니다. 외부 앱의 전송·보관은 해당 앱에서 관리합니다. " +
                     "동작·가족 확인 기록은 90일 후 정리되며 기록 삭제로 지울 수 있습니다. 앱 데이터는 기기 백업에서 제외되며 앱 삭제 시 제거됩니다.",
                 modifier = Modifier.verticalScroll(rememberScrollState())
             )

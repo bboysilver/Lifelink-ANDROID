@@ -76,6 +76,8 @@ interface SafetyIncidentDao {
             (SELECT COUNT(*) FROM safety_recipients r WHERE r.incidentId = i.id
                 AND r.dispatchState IN ('SENT', 'DELIVERED')) AS sentRecipients,
             (SELECT COUNT(*) FROM safety_recipients r WHERE r.incidentId = i.id) AS totalRecipients,
+            (SELECT COUNT(*) FROM safety_recipients r WHERE r.incidentId = i.id
+                AND r.dispatchState = 'DELIVERED') AS deliveredRecipients,
             f.status AS followUpStatus, f.updatedAtMs AS followUpUpdatedAtMs
         FROM safety_incidents i
         LEFT JOIN safety_followups f ON f.incidentId = i.id
@@ -85,6 +87,16 @@ interface SafetyIncidentDao {
         """
     )
     fun getRecentReviews(): Flow<List<SafetyReviewItem>>
+
+    @Query(
+        """
+        SELECT r.eventId, r.dispatchState, r.updatedAtMs
+        FROM safety_recipients r
+        WHERE r.attemptCount > 0
+        ORDER BY r.updatedAtMs DESC, r.eventId DESC LIMIT 1
+        """
+    )
+    fun getLatestSmsRecord(): Flow<RecentSmsRecord?>
 
     @Query("SELECT * FROM safety_followups WHERE incidentId = :incidentId")
     suspend fun getFollowUp(incidentId: String): SafetyFollowUp?

@@ -8,6 +8,7 @@ import android.hardware.Sensor
 import android.hardware.SensorManager
 import android.os.Build
 import android.os.PowerManager
+import android.provider.Settings
 import androidx.core.content.ContextCompat
 import com.example.data.MonitoringRuntimeState
 import com.example.data.MonitoringSnapshot
@@ -22,7 +23,8 @@ data class DiagnosticEnvironment(
     val activityGranted: Boolean,
     val notificationsGranted: Boolean,
     val hasActivitySensor: Boolean,
-    val batteryPolicy: BatteryPolicy
+    val batteryPolicy: BatteryPolicy,
+    val airplaneModeEnabled: Boolean = false
 ) {
     val permissionsGranted: Boolean
         get() = smsGranted && phoneGranted && activityGranted && notificationsGranted
@@ -69,6 +71,9 @@ internal object SafetyDiagnosticsReader {
             notificationsGranted = SafetyNotificationCapability.canPost(context),
             hasActivitySensor = sensors?.getDefaultSensor(Sensor.TYPE_STEP_DETECTOR) != null ||
                 sensors?.getDefaultSensor(Sensor.TYPE_ACCELEROMETER) != null,
+            airplaneModeEnabled = Settings.Global.getInt(
+                context.contentResolver, Settings.Global.AIRPLANE_MODE_ON, 0
+            ) != 0,
             batteryPolicy = when {
                 backgroundRestricted -> BatteryPolicy.RESTRICTED
                 power == null -> BatteryPolicy.UNKNOWN

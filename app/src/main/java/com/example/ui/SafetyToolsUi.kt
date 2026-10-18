@@ -104,7 +104,8 @@ internal fun SafetyDiagnosticsDialog(
     lastSmsSentAtMs: Long?,
     onRefresh: () -> Unit,
     onRepairSetup: () -> Unit,
-    onDismiss: () -> Unit
+    onDismiss: () -> Unit,
+    onOpenFieldVisit: (() -> Unit)? = null
 ) {
     val context = LocalContext.current
     var settingsError by remember { mutableStateOf(false) }
@@ -167,6 +168,11 @@ internal fun SafetyDiagnosticsDialog(
                 ) { Text("배터리 설정 열기") }
                 if (settingsError) Text("설정 화면을 열 수 없습니다. 휴대전화 설정에서 LifeLink의 배터리 제한을 확인해 주세요.")
                 Text("전원이 꺼지거나 앱을 강제 종료하면 이 기기에서 중단 알림을 보낼 수 없습니다. 보호자 원격 감시는 아직 제공하지 않습니다.")
+                onOpenFieldVisit?.let { open ->
+                    OutlinedButton(onClick = open, modifier = Modifier.fillMaxWidth().heightIn(min = 56.dp).testTag("open_field_visit")) {
+                        Text("현장 점검·요약 공유")
+                    }
+                }
             }
         },
         confirmButton = { Button(onClick = onDismiss) { Text("확인") } },
@@ -203,8 +209,10 @@ internal fun FamilyReviewCard(
                 fontWeight = FontWeight.Bold, fontSize = 20.sp
             )
             Text("발생 시각: ${diagnosticTime(item.occurredAtMs)}")
-            Text("문자 발송 확인: ${item.sentRecipients}/${item.totalRecipients}명 · 열람 여부는 알 수 없음")
-            Text("직접 입력한 결과: ${status?.label ?: "기록 없음"}", fontWeight = FontWeight.Bold)
+            Text("SMS 발송 확인: ${item.sentRecipients}/${item.totalRecipients}명")
+            Text("SMS 전달 확인: ${item.deliveredRecipients}/${item.totalRecipients}명 · 전달 미확인 ${item.totalRecipients - item.deliveredRecipients}명 · 열람 여부 알 수 없음")
+            val memo = status?.label ?: if (item.followUpStatus == null) "미기록" else "알 수 없는 기록 · 확인 필요"
+            Text("이 단말에 기록한 메모: $memo", fontWeight = FontWeight.Bold)
             item.followUpUpdatedAtMs?.let { Text("기록 시각: ${diagnosticTime(it)}") }
             FamilyFollowUpStatus.entries.forEach { option ->
                 OutlinedButton(
