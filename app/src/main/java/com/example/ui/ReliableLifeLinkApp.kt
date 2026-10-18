@@ -3,7 +3,6 @@ package com.example.ui
 import android.Manifest
 import android.content.Intent
 import android.content.pm.PackageManager
-import android.net.Uri
 import android.os.Build
 import android.provider.Settings
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -61,6 +60,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
@@ -78,6 +78,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
+import androidx.core.net.toUri
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LifecycleEventEffect
 import com.example.BuildConfig
@@ -107,7 +108,7 @@ fun LifeLinkApp(viewModel: LifeLinkViewModel) {
     val dailyCheckInDue by viewModel.dailyCheckInDue.collectAsState()
     val sosCountdownSeconds by viewModel.sosCountdownSeconds.collectAsState()
     val userNotice by viewModel.userNotice.collectAsState()
-    var selectedTab by remember { mutableStateOf(0) }
+    var selectedTab by remember { mutableIntStateOf(0) }
     var permissions by remember { mutableStateOf(SafetyPermissions.read(context)) }
     val refreshPermissions: () -> Unit = {
         val refreshed = SafetyPermissions.read(context)
@@ -1010,7 +1011,7 @@ internal fun notificationSettingsIntent(packageName: String): Intent =
         Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS)
             .putExtra(Settings.EXTRA_APP_PACKAGE, packageName)
     } else {
-        Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:$packageName"))
+        Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, "package:$packageName".toUri())
     }
 
 private fun formatRemaining(seconds: Long): String {

@@ -21,14 +21,16 @@ val hasReleaseSigning = !releaseStoreFile.isNullOrBlank() &&
 
 android {
   namespace = "com.example"
-  compileSdk = 36
+  compileSdk {
+    version = release(37) { minorApiLevel = 0 }
+  }
 
   defaultConfig {
     applicationId = "com.bboysilver.lifelink"
     minSdk = 24
     targetSdk = 36
-    versionCode = 43
-    versionName = "2.3.5"
+    versionCode = 44
+    versionName = "2.3.6"
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
   }
 
@@ -59,7 +61,16 @@ android {
     compose = true
     buildConfig = true
   }
-  testOptions { unitTests { isIncludeAndroidResources = true } }
+  testOptions {
+    unitTests {
+      isIncludeAndroidResources = true
+      all {
+        // Robolectric 4.17 requires this JDK 17+ access for Android shared-memory stubs.
+        // This applies only to the isolated test JVM, never to the Android app.
+        it.jvmArgs("--add-opens=java.base/jdk.internal.access=ALL-UNNAMED")
+      }
+    }
+  }
 }
 
 dependencies {

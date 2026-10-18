@@ -19,6 +19,8 @@ jobs:
           distribution: temurin
           java-version: '21'
       - uses: gradle/actions/setup-gradle@v6
+      - name: Install compile SDK (minimum and target versions are unchanged)
+        run: '"$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --install "platforms;android-37.0"'
       - name: Test, lint, and assemble
         run: ./gradlew --no-daemon test lint assembleDebug
       - name: Upload debug APK
