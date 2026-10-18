@@ -42,6 +42,8 @@ Windows / Android Studio JBR 21.0.10에서 다음 전체 명령을 실행했습�
 
 첫 서명 CI(39133853162)는 테스트 284개와 서명 검사를 통과했지만, 네트워크에서 새 버전 정보를 조회해 로컬 보고서에 없던 권고 2개를 추가했습니다: target API 37 권고(OldTargetApi), Gradle 9.8.1 권고(AndroidGradlePluginVersion). 이 중간 파일은 Play에 제출하지 않았습니다. target API 36과 공식 AGP 9.1.1/Gradle 9.3.1 조합을 유지해야 하므로 두 선언 바로 앞에 사유와 해당 검사만의 예외를 추가했습니다. 새로운 Android 동작 변경이나 호환 범위를 넘는 Gradle 업그레이드로 경고 숫자만 줄이지 않습니다. 최종 CI 결과와 실제 제출 파일은 배포 기록에 구분합니다.
 
+두 번째 서명 CI(39134445422)에서 target API 예외는 적용됐지만 wrapper properties의 줄 주석은 lint가 해석하지 않아 Gradle 권고 1개가 남았습니다. 이 파일도 제출하지 않았습니다. `app/lint.xml`에서 **9.3.1이라는 정확한 고정 버전의 권고 문구만** 일치시키는 예외로 교체했습니다. 다른 AGP/Gradle/의존성 경고는 계속 검사합니다. `warningsAsErrors=true`를 추가해 앞으로 검토하지 않은 lint 경고가 생기면 CI가 성공으로 끝나지 않도록 합니다. Actions 자체의 Gradle 업데이트/호스트 OS 이전 안내는 Android lint와 별개이며 앱 오류가 아닙니다.
+
 업데이트 과정에서 Robolectric의 제거된 SensorEvent 생성 API와 Java 21의 jdk.internal.access 접근 제한 때문에 중간 검사에 실패했습니다. SensorEventBuilder와 공식 권고의 테스트 JVM 전용 add-opens로 수정한 후 위 전체 검사를 다시 통과했습니다. Android 앱의 보안 설정을 완화한 것이 아닙니다. 일부 테스트 SDK의 deprecation 컴파일 안내는 남으며, lint 경고 0과 모든 종류의 컴파일 안내 0은 구분합니다.
 
 ## 정책·실기기 한계

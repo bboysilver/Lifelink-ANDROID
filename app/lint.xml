@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<lint>
+    <!-- AGP 9.1.1 documents Gradle 9.3.1; newer Gradle needs separate compatibility testing.
+         Match only this pinned version's recommendation, not other AGP/dependency warnings. -->
+    <issue id="AndroidGradlePluginVersion">
+        <ignore regexp="A newer version of Gradle than 9[.]3[.]1 is available:" />
+    </issue>
+</lint>

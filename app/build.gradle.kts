@@ -63,6 +63,9 @@ android {
     compose = true
     buildConfig = true
   }
+  lint {
+    warningsAsErrors = true
+  }
   testOptions {
     unitTests {
       isIncludeAndroidResources = true
