@@ -44,6 +44,8 @@ Windows / Android Studio JBR 21.0.10에서 다음 전체 명령을 실행했습�
 
 두 번째 서명 CI(39134445422)에서 target API 예외는 적용됐지만 wrapper properties의 줄 주석은 lint가 해석하지 않아 Gradle 권고 1개가 남았습니다. 이 파일도 제출하지 않았습니다. `app/lint.xml`에서 **9.3.1이라는 정확한 고정 버전의 권고 문구만** 일치시키는 예외로 교체했습니다. 다른 AGP/Gradle/의존성 경고는 계속 검사합니다. `warningsAsErrors=true`를 추가해 앞으로 검토하지 않은 lint 경고가 생기면 CI가 성공으로 끝나지 않도록 합니다. Actions 자체의 Gradle 업데이트/호스트 OS 이전 안내는 Android lint와 별개이며 앱 오류가 아닙니다.
 
+최종 main 소스 `0008f54103bea835c6f2e642be72b835576e2116`의 [Android verification](https://github.com/bboysilver/Lifelink-ANDROID/actions/runs/39134710270)과 [Signed Android release](https://github.com/bboysilver/Lifelink-ANDROID/actions/runs/39134710531)가 모두 성공했습니다. 다운로드한 최종 CI 보고서에서 테스트 284개/실패·오류·건너뜀 0개, lint `No issues found.`(오류·경고·Hint 0개)를 확인했습니다. 최종 AAB의 실제 인증서와 CI 해시를 독립 대조했으며, 중간 두 CI 파일이 아닌 이 커밋의 파일만 제출 대상으로 선정했습니다. 로컬 최종 lint도 성공했습니다.
+
 업데이트 과정에서 Robolectric의 제거된 SensorEvent 생성 API와 Java 21의 jdk.internal.access 접근 제한 때문에 중간 검사에 실패했습니다. SensorEventBuilder와 공식 권고의 테스트 JVM 전용 add-opens로 수정한 후 위 전체 검사를 다시 통과했습니다. Android 앱의 보안 설정을 완화한 것이 아닙니다. 일부 테스트 SDK의 deprecation 컴파일 안내는 남으며, lint 경고 0과 모든 종류의 컴파일 안내 0은 구분합니다.
 
 ## 정책·실기기 한계
