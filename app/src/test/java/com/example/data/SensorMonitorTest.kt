@@ -19,7 +19,7 @@ import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.Shadows.shadowOf
 import org.robolectric.shadows.ShadowSensor
-import org.robolectric.shadows.ShadowSensorManager
+import org.robolectric.shadows.SensorEventBuilder
 import org.robolectric.shadows.ShadowSystemClock
 import java.time.Duration
 
@@ -220,11 +220,9 @@ class SensorMonitorTest {
     }
 
     private fun sendEvent(sensor: Sensor, timestampNanos: Long, x: Float = 1f) {
-        val event = ShadowSensorManager.createSensorEvent(3).apply {
-            this.sensor = sensor
-            timestamp = timestampNanos
-            values[0] = x
-        }
+        val event = SensorEventBuilder.newBuilder(sensor, floatArrayOf(x, 0f, 0f))
+            .setTimestamp(timestampNanos)
+            .build()
         shadowOf(sensorManager).sendSensorEventToListeners(event, sensor)
     }
 }

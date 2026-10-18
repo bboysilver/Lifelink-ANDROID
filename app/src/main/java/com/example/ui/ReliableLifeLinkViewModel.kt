@@ -44,6 +44,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
@@ -80,6 +81,18 @@ class LifeLinkViewModel(application: Application) : AndroidViewModel(application
         started = SharingStarted.WhileSubscribed(5_000),
         initialValue = emptyList()
     )
+    internal val actualSmsObservation: StateFlow<SmsObservation?> = repository.latestSmsRecord.map { record ->
+        record?.let {
+            val status = smsDispatchStore.status(it.eventId)
+            if (status.updatedAtMs >= it.updatedAtMs && status.attempt > 0) {
+                smsObservation(false, status.state.name, status.updatedAtMs, status.lastResultCode)
+            } else {
+                smsObservation(false, it.dispatchState, it.updatedAtMs)
+            }
+        }
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
+    private val _testSmsObservation = MutableStateFlow<SmsObservation?>(null)
+    internal val testSmsObservation: StateFlow<SmsObservation?> = _testSmsObservation.asStateFlow()
     private val _familyNotice = MutableStateFlow("")
     val familyNotice: StateFlow<String> = _familyNotice.asStateFlow()
     private val _simpleHomeEnabled = MutableStateFlow(monitoringStore.simpleHomeEnabled)
@@ -655,6 +668,10 @@ class LifeLinkViewModel(application: Application) : AndroidViewModel(application
         _dailyCheckInError.value = monitoringStore.dailyCheckInError
         _setupStep.value = SetupStep.fromStored(monitoringStore.setupStep)
         _testSmsVerification.value = monitoringStore.testSmsVerification
+        _testSmsObservation.value = monitoringStore.testSmsVerification.eventId.takeIf { it.isNotEmpty() }?.let { eventId ->
+            val status = smsDispatchStore.status(eventId)
+            smsObservation(true, status.state.name, status.updatedAtMs, status.lastResultCode)
+        }
         _debugMonitorMinutes.value = monitoringStore.debugMonitorMinutes
         _remainingSeconds.value = snapshot.remainingSeconds
         _isMonitoring.value = snapshot.isRunning

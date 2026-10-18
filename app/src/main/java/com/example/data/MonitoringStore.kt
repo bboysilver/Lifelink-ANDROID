@@ -3,6 +3,7 @@ package com.example.data
 import android.annotation.SuppressLint
 import android.content.Context
 import android.os.SystemClock
+import androidx.core.content.edit
 import com.example.BuildConfig
 import com.example.monitoring.InactivityDeadlineScheduler
 import com.example.monitoring.InactivityDeadlineTask
@@ -57,7 +58,7 @@ class MonitoringStore(context: Context) {
 
     var monitorHours: Int
         get() = preferences.getInt(KEY_MONITOR_HOURS, 12).coerceIn(6, 72)
-        set(value) = preferences.edit().putInt(KEY_MONITOR_HOURS, value.coerceIn(6, 72)).apply()
+        set(value) = preferences.edit { putInt(KEY_MONITOR_HOURS, value.coerceIn(6, 72)) }
 
     var deviceAlias: String
         get() = preferences.getString(KEY_DEVICE_ALIAS, DEFAULT_DEVICE_ALIAS)
@@ -66,19 +67,19 @@ class MonitoringStore(context: Context) {
             ?: DEFAULT_DEVICE_ALIAS
         set(value) {
             val normalized = value.trim().take(30).ifEmpty { DEFAULT_DEVICE_ALIAS }
-            preferences.edit().putString(KEY_DEVICE_ALIAS, normalized).apply()
+            preferences.edit { putString(KEY_DEVICE_ALIAS, normalized) }
         }
 
     var simpleHomeEnabled: Boolean
         get() = preferences.getBoolean(KEY_SIMPLE_HOME, false)
-        set(value) = preferences.edit().putBoolean(KEY_SIMPLE_HOME, value).apply()
+        set(value) = preferences.edit { putBoolean(KEY_SIMPLE_HOME, value) }
 
     val desiredEnabled: Boolean
         get() = preferences.getBoolean(KEY_DESIRED_ENABLED, false)
 
     var smsSubscriptionId: Int
         get() = preferences.getInt(KEY_SMS_SUBSCRIPTION_ID, INVALID_SUBSCRIPTION_ID)
-        set(value) = preferences.edit().putInt(KEY_SMS_SUBSCRIPTION_ID, value).apply()
+        set(value) = preferences.edit { putInt(KEY_SMS_SUBSCRIPTION_ID, value) }
 
     val dailyCheckInEnabled: Boolean
         get() = preferences.getBoolean(KEY_DAILY_CHECK_IN_ENABLED, false)
@@ -95,7 +96,7 @@ class MonitoringStore(context: Context) {
 
     var dailyCheckInError: String
         get() = preferences.getString(KEY_DAILY_CHECK_IN_ERROR, "").orEmpty()
-        set(value) = preferences.edit().putString(KEY_DAILY_CHECK_IN_ERROR, value).apply()
+        set(value) = preferences.edit { putString(KEY_DAILY_CHECK_IN_ERROR, value) }
 
     val pendingSosEventMs: Long
         get() = preferences.getLong(KEY_PENDING_SOS_EVENT_MS, 0L)
@@ -135,9 +136,7 @@ class MonitoringStore(context: Context) {
         get() = if (BuildConfig.DEBUG) preferences.getInt(KEY_DEBUG_MONITOR_MINUTES, 0) else 0
         set(value) {
             if (BuildConfig.DEBUG) {
-                preferences.edit()
-                    .putInt(KEY_DEBUG_MONITOR_MINUTES, value.takeIf { it == 1 || it == 5 } ?: 0)
-                    .apply()
+                preferences.edit { putInt(KEY_DEBUG_MONITOR_MINUTES, value.takeIf { it == 1 || it == 5 } ?: 0) }
             }
         }
 
@@ -149,48 +148,48 @@ class MonitoringStore(context: Context) {
         get() = preferences.getLong(KEY_INACTIVITY_EVENT_MS, deadlineMs)
 
     fun setSetupStep(step: Int) {
-        preferences.edit().putInt(KEY_SETUP_STEP, step.coerceIn(0, 5)).apply()
+        preferences.edit { putInt(KEY_SETUP_STEP, step.coerceIn(0, 5)) }
     }
 
     fun beginSetupReview() = synchronized(ACTIVITY_LOCK) {
         InactivityDeadlineScheduler(appContext).cancel()
         InactivityDeadlineTask.cancelPreAlert(appContext)
-        preferences.edit()
-            .putBoolean(KEY_SETUP_COMPLETED, false)
-            .putBoolean(KEY_DESIRED_ENABLED, false)
-            .putString(KEY_RUNTIME_STATE, MonitoringRuntimeState.STOPPED.name)
-            .putInt(KEY_SETUP_STEP, 0)
-            .putString(KEY_TEST_SMS_STATE, TestSmsVerificationState.NOT_SENT.name)
-            .remove(KEY_TEST_SMS_CONTACT_ID)
-            .remove(KEY_TEST_SMS_EVENT_ID)
-            .remove(KEY_TEST_SMS_MESSAGE)
-            .apply()
+        preferences.edit {
+            putBoolean(KEY_SETUP_COMPLETED, false)
+            putBoolean(KEY_DESIRED_ENABLED, false)
+            putString(KEY_RUNTIME_STATE, MonitoringRuntimeState.STOPPED.name)
+            putInt(KEY_SETUP_STEP, 0)
+            putString(KEY_TEST_SMS_STATE, TestSmsVerificationState.NOT_SENT.name)
+            remove(KEY_TEST_SMS_CONTACT_ID)
+            remove(KEY_TEST_SMS_EVENT_ID)
+            remove(KEY_TEST_SMS_MESSAGE)
+        }
     }
 
     fun completeSetup() {
-        preferences.edit()
-            .putBoolean(KEY_SETUP_COMPLETED, true)
-            .putInt(KEY_ONBOARDING_VERSION, CURRENT_ONBOARDING_VERSION)
-            .putInt(KEY_SETUP_STEP, 5)
-            .apply()
+        preferences.edit {
+            putBoolean(KEY_SETUP_COMPLETED, true)
+            putInt(KEY_ONBOARDING_VERSION, CURRENT_ONBOARDING_VERSION)
+            putInt(KEY_SETUP_STEP, 5)
+        }
     }
 
     fun invalidateTestSmsVerification() {
-        preferences.edit()
-            .putString(KEY_TEST_SMS_STATE, TestSmsVerificationState.NOT_SENT.name)
-            .remove(KEY_TEST_SMS_CONTACT_ID)
-            .remove(KEY_TEST_SMS_EVENT_ID)
-            .remove(KEY_TEST_SMS_MESSAGE)
-            .apply()
+        preferences.edit {
+            putString(KEY_TEST_SMS_STATE, TestSmsVerificationState.NOT_SENT.name)
+            remove(KEY_TEST_SMS_CONTACT_ID)
+            remove(KEY_TEST_SMS_EVENT_ID)
+            remove(KEY_TEST_SMS_MESSAGE)
+        }
     }
 
     fun markTestSmsPending(contactId: Int, eventId: String) {
-        preferences.edit()
-            .putString(KEY_TEST_SMS_STATE, TestSmsVerificationState.PENDING.name)
-            .putInt(KEY_TEST_SMS_CONTACT_ID, contactId)
-            .putString(KEY_TEST_SMS_EVENT_ID, eventId)
-            .putString(KEY_TEST_SMS_MESSAGE, "시험 문자 발송 결과를 확인하고 있습니다.")
-            .apply()
+        preferences.edit {
+            putString(KEY_TEST_SMS_STATE, TestSmsVerificationState.PENDING.name)
+            putInt(KEY_TEST_SMS_CONTACT_ID, contactId)
+            putString(KEY_TEST_SMS_EVENT_ID, eventId)
+            putString(KEY_TEST_SMS_MESSAGE, "시험 문자 발송 결과를 확인하고 있습니다.")
+        }
     }
 
     fun recordTestSmsResult(
@@ -199,18 +198,18 @@ class MonitoringStore(context: Context) {
         message: String
     ) {
         if (testSmsVerification.eventId != eventId) return
-        preferences.edit()
-            .putString(KEY_TEST_SMS_STATE, state.name)
-            .putString(KEY_TEST_SMS_MESSAGE, message)
-            .apply()
+        preferences.edit {
+            putString(KEY_TEST_SMS_STATE, state.name)
+            putString(KEY_TEST_SMS_MESSAGE, message)
+        }
     }
 
     fun setDesiredEnabled(enabled: Boolean) = synchronized(ACTIVITY_LOCK) {
-        preferences.edit()
-            .putBoolean(KEY_DESIRED_ENABLED, enabled)
-            .putString(KEY_RUNTIME_STATE, MonitoringRuntimeState.STOPPED.name)
-            .putLong(KEY_STATE_UPDATED_MS, System.currentTimeMillis())
-            .apply()
+        preferences.edit {
+            putBoolean(KEY_DESIRED_ENABLED, enabled)
+            putString(KEY_RUNTIME_STATE, MonitoringRuntimeState.STOPPED.name)
+            putLong(KEY_STATE_UPDATED_MS, System.currentTimeMillis())
+        }
     }
 
     fun beginStart(
@@ -221,35 +220,35 @@ class MonitoringStore(context: Context) {
         val newDeadline = configuredDeadlineMs(nowMs)
         val newEventMs = nextInactivityEventMs(newDeadline)
         InactivityDeadlineTask.cancelPreAlert(appContext)
-        preferences.edit()
-            .putBoolean(KEY_DESIRED_ENABLED, true)
-            .putString(KEY_RUNTIME_STATE, MonitoringRuntimeState.STARTING.name)
-            .putLong(KEY_STATE_UPDATED_MS, nowMs)
-            .putLong(KEY_LAST_HEARTBEAT_MS, 0L)
-            .putLong(KEY_LAST_HEARTBEAT_ELAPSED_MS, elapsedRealtimeMs)
-            .putLong(KEY_CLOCK_WALL_MS, nowMs)
-            .putLong(KEY_CLOCK_ELAPSED_MS, elapsedRealtimeMs)
-            .remove(KEY_WATCHDOG_ALERT_TOKEN)
-            .putString(KEY_SERVICE_ERROR, "")
-            .putLong(KEY_LAST_ACTIVITY_MS, nowMs)
-            .putString(KEY_LAST_ACTIVITY_REASON, reason)
-            .putLong(KEY_DEADLINE_MS, newDeadline)
-            .putLong(KEY_INACTIVITY_EVENT_MS, newEventMs)
-            .apply()
+        preferences.edit {
+            putBoolean(KEY_DESIRED_ENABLED, true)
+            putString(KEY_RUNTIME_STATE, MonitoringRuntimeState.STARTING.name)
+            putLong(KEY_STATE_UPDATED_MS, nowMs)
+            putLong(KEY_LAST_HEARTBEAT_MS, 0L)
+            putLong(KEY_LAST_HEARTBEAT_ELAPSED_MS, elapsedRealtimeMs)
+            putLong(KEY_CLOCK_WALL_MS, nowMs)
+            putLong(KEY_CLOCK_ELAPSED_MS, elapsedRealtimeMs)
+            remove(KEY_WATCHDOG_ALERT_TOKEN)
+            putString(KEY_SERVICE_ERROR, "")
+            putLong(KEY_LAST_ACTIVITY_MS, nowMs)
+            putString(KEY_LAST_ACTIVITY_REASON, reason)
+            putLong(KEY_DEADLINE_MS, newDeadline)
+            putLong(KEY_INACTIVITY_EVENT_MS, newEventMs)
+        }
     }
 
     fun stop(nowMs: Long = System.currentTimeMillis()) = synchronized(ACTIVITY_LOCK) {
         InactivityDeadlineScheduler(appContext).cancel()
         InactivityDeadlineTask.cancelPreAlert(appContext)
-        preferences.edit()
-            .putBoolean(KEY_DESIRED_ENABLED, false)
-            .putString(KEY_RUNTIME_STATE, MonitoringRuntimeState.STOPPED.name)
-            .putLong(KEY_STATE_UPDATED_MS, nowMs)
-            .putLong(KEY_LAST_HEARTBEAT_MS, 0L)
-            .remove(KEY_LAST_HEARTBEAT_ELAPSED_MS)
-            .remove(KEY_WATCHDOG_ALERT_TOKEN)
-            .putString(KEY_SERVICE_ERROR, "")
-            .apply()
+        preferences.edit {
+            putBoolean(KEY_DESIRED_ENABLED, false)
+            putString(KEY_RUNTIME_STATE, MonitoringRuntimeState.STOPPED.name)
+            putLong(KEY_STATE_UPDATED_MS, nowMs)
+            putLong(KEY_LAST_HEARTBEAT_MS, 0L)
+            remove(KEY_LAST_HEARTBEAT_ELAPSED_MS)
+            remove(KEY_WATCHDOG_ALERT_TOKEN)
+            putString(KEY_SERVICE_ERROR, "")
+        }
     }
 
     fun resetDeadline(
@@ -261,14 +260,14 @@ class MonitoringStore(context: Context) {
         val newDeadline = configuredDeadlineMs(nowMs)
         val newEventMs = nextInactivityEventMs(newDeadline)
         InactivityDeadlineTask.cancelPreAlert(appContext)
-        preferences.edit()
-            .putLong(KEY_LAST_ACTIVITY_MS, nowMs)
-            .putString(KEY_LAST_ACTIVITY_REASON, reason)
-            .putLong(KEY_DEADLINE_MS, newDeadline)
-            .putLong(KEY_INACTIVITY_EVENT_MS, newEventMs)
-            .putLong(KEY_CLOCK_WALL_MS, clockNowMs)
-            .putLong(KEY_CLOCK_ELAPSED_MS, elapsedRealtimeMs)
-            .apply()
+        preferences.edit {
+            putLong(KEY_LAST_ACTIVITY_MS, nowMs)
+            putString(KEY_LAST_ACTIVITY_REASON, reason)
+            putLong(KEY_DEADLINE_MS, newDeadline)
+            putLong(KEY_INACTIVITY_EVENT_MS, newEventMs)
+            putLong(KEY_CLOCK_WALL_MS, clockNowMs)
+            putLong(KEY_CLOCK_ELAPSED_MS, elapsedRealtimeMs)
+        }
         InactivityDeadlineScheduler(appContext).ensureScheduled(clockNowMs)
         newDeadline
     }
@@ -314,11 +313,11 @@ class MonitoringStore(context: Context) {
     }
 
     fun markServiceStarting(nowMs: Long = System.currentTimeMillis()) = synchronized(ACTIVITY_LOCK) {
-        preferences.edit()
-            .putString(KEY_RUNTIME_STATE, MonitoringRuntimeState.STARTING.name)
-            .putLong(KEY_STATE_UPDATED_MS, nowMs)
-            .putString(KEY_SERVICE_ERROR, "")
-            .apply()
+        preferences.edit {
+            putString(KEY_RUNTIME_STATE, MonitoringRuntimeState.STARTING.name)
+            putLong(KEY_STATE_UPDATED_MS, nowMs)
+            putString(KEY_SERVICE_ERROR, "")
+        }
     }
 
     fun markServiceRunning(
@@ -326,16 +325,16 @@ class MonitoringStore(context: Context) {
         elapsedRealtimeMs: Long = SystemClock.elapsedRealtime()
     ) = synchronized(ACTIVITY_LOCK) {
         rebaseAfterWallClockChange(nowMs, elapsedRealtimeMs)
-        preferences.edit()
-            .putString(KEY_RUNTIME_STATE, MonitoringRuntimeState.RUNNING.name)
-            .putLong(KEY_STATE_UPDATED_MS, nowMs)
-            .putLong(KEY_LAST_HEARTBEAT_MS, nowMs)
-            .putLong(KEY_LAST_HEARTBEAT_ELAPSED_MS, elapsedRealtimeMs)
-            .putLong(KEY_CLOCK_WALL_MS, nowMs)
-            .putLong(KEY_CLOCK_ELAPSED_MS, elapsedRealtimeMs)
-            .remove(KEY_WATCHDOG_ALERT_TOKEN)
-            .putString(KEY_SERVICE_ERROR, "")
-            .apply()
+        preferences.edit {
+            putString(KEY_RUNTIME_STATE, MonitoringRuntimeState.RUNNING.name)
+            putLong(KEY_STATE_UPDATED_MS, nowMs)
+            putLong(KEY_LAST_HEARTBEAT_MS, nowMs)
+            putLong(KEY_LAST_HEARTBEAT_ELAPSED_MS, elapsedRealtimeMs)
+            putLong(KEY_CLOCK_WALL_MS, nowMs)
+            putLong(KEY_CLOCK_ELAPSED_MS, elapsedRealtimeMs)
+            remove(KEY_WATCHDOG_ALERT_TOKEN)
+            putString(KEY_SERVICE_ERROR, "")
+        }
         InactivityDeadlineScheduler(appContext).ensureScheduled(nowMs)
     }
 
@@ -345,17 +344,18 @@ class MonitoringStore(context: Context) {
     ): Boolean = synchronized(ACTIVITY_LOCK) {
         if (!desiredEnabled) return@synchronized false
         val clockCorrected = rebaseAfterWallClockChange(nowMs, elapsedRealtimeMs)
-        preferences.edit()
-            .putString(KEY_RUNTIME_STATE, MonitoringRuntimeState.RUNNING.name)
-            .putLong(KEY_LAST_HEARTBEAT_MS, nowMs)
-            .putLong(KEY_LAST_HEARTBEAT_ELAPSED_MS, elapsedRealtimeMs)
-            .putLong(KEY_CLOCK_WALL_MS, nowMs)
-            .putLong(KEY_CLOCK_ELAPSED_MS, elapsedRealtimeMs)
-            .apply()
+        preferences.edit {
+            putString(KEY_RUNTIME_STATE, MonitoringRuntimeState.RUNNING.name)
+            putLong(KEY_LAST_HEARTBEAT_MS, nowMs)
+            putLong(KEY_LAST_HEARTBEAT_ELAPSED_MS, elapsedRealtimeMs)
+            putLong(KEY_CLOCK_WALL_MS, nowMs)
+            putLong(KEY_CLOCK_ELAPSED_MS, elapsedRealtimeMs)
+        }
         clockCorrected
     }
 
-    @SuppressLint("ApplySharedPref")
+    // Keep one explicit editor for the conditional clock rebase before a single durable commit.
+    @SuppressLint("ApplySharedPref", "UseKtx")
     fun rebaseAfterWallClockChange(
         nowMs: Long = System.currentTimeMillis(),
         elapsedRealtimeMs: Long = SystemClock.elapsedRealtime()
@@ -398,13 +398,15 @@ class MonitoringStore(context: Context) {
 
     fun markServiceError(message: String, nowMs: Long = System.currentTimeMillis()) = synchronized(ACTIVITY_LOCK) {
         if (!desiredEnabled) return@synchronized
-        preferences.edit()
-            .putString(KEY_RUNTIME_STATE, MonitoringRuntimeState.ERROR.name)
-            .putLong(KEY_STATE_UPDATED_MS, nowMs)
-            .putString(KEY_SERVICE_ERROR, message)
-            .apply()
+        preferences.edit {
+            putString(KEY_RUNTIME_STATE, MonitoringRuntimeState.ERROR.name)
+            putLong(KEY_STATE_UPDATED_MS, nowMs)
+            putString(KEY_SERVICE_ERROR, message)
+        }
     }
 
+    // KTX edit returns Unit; this claim must return the actual commit result.
+    @SuppressLint("UseKtx")
     fun claimWatchdogAlert(token: Long): Boolean = synchronized(WATCHDOG_LOCK) {
         if (preferences.getLong(KEY_WATCHDOG_ALERT_TOKEN, Long.MIN_VALUE) == token) {
             return@synchronized false
@@ -452,10 +454,12 @@ class MonitoringStore(context: Context) {
             dailyResponseDeadlineAtMs + delta
         }
         val deltaMs = newDeadline - dailyResponseDeadlineAtMs
-        preferences.edit().putLong(KEY_DAILY_RESPONSE_DEADLINE_AT_MS, newDeadline)
-            .putLong(KEY_DAILY_ACTIVITY_THRESHOLD_MS, preferences.getLong(KEY_DAILY_ACTIVITY_THRESHOLD_MS, dailyNextDueAtMs) + deltaMs)
-            .putLong(KEY_DAILY_CLOCK_WALL_MS, nowMs)
-            .putLong(KEY_DAILY_CLOCK_ELAPSED_MS, elapsedRealtimeMs).commit()
+        preferences.edit(commit = true) {
+            putLong(KEY_DAILY_RESPONSE_DEADLINE_AT_MS, newDeadline)
+            putLong(KEY_DAILY_ACTIVITY_THRESHOLD_MS, preferences.getLong(KEY_DAILY_ACTIVITY_THRESHOLD_MS, dailyNextDueAtMs) + deltaMs)
+            putLong(KEY_DAILY_CLOCK_WALL_MS, nowMs)
+            putLong(KEY_DAILY_CLOCK_ELAPSED_MS, elapsedRealtimeMs)
+        }
         return true
     }
 
@@ -466,31 +470,31 @@ class MonitoringStore(context: Context) {
     ): Long = synchronized(DAILY_LOCK) {
         MonitoringService.cancelDailyNotification(appContext)
         if (hour == null) {
-            preferences.edit()
-                .putBoolean(KEY_DAILY_CHECK_IN_ENABLED, false)
-                .remove(KEY_DAILY_NEXT_DUE_AT_MS)
-                .remove(KEY_DAILY_PROMPTED_DUE_AT_MS)
-                .remove(KEY_DAILY_ALERTED_DUE_AT_MS)
-                .remove(KEY_DAILY_RESPONSE_DEADLINE_AT_MS)
-                .remove(KEY_DAILY_CHECK_IN_ERROR)
-                .commit()
+            preferences.edit(commit = true) {
+                putBoolean(KEY_DAILY_CHECK_IN_ENABLED, false)
+                remove(KEY_DAILY_NEXT_DUE_AT_MS)
+                remove(KEY_DAILY_PROMPTED_DUE_AT_MS)
+                remove(KEY_DAILY_ALERTED_DUE_AT_MS)
+                remove(KEY_DAILY_RESPONSE_DEADLINE_AT_MS)
+                remove(KEY_DAILY_CHECK_IN_ERROR)
+            }
             return@synchronized 0L
         }
 
         val normalizedHour = hour.coerceIn(0, 23)
         val nextDueAtMs = DailyCheckInCalculator.nextDueAt(nowMs, normalizedHour)
-        preferences.edit()
-            .putBoolean(KEY_DAILY_CHECK_IN_ENABLED, true)
-            .putInt(KEY_DAILY_CHECK_IN_HOUR, normalizedHour)
-            .putLong(KEY_DAILY_NEXT_DUE_AT_MS, nextDueAtMs)
-            .remove(KEY_DAILY_PROMPTED_DUE_AT_MS)
-            .remove(KEY_DAILY_ALERTED_DUE_AT_MS)
-            .remove(KEY_DAILY_RESPONSE_DEADLINE_AT_MS)
-            .remove(KEY_DAILY_CHECK_IN_ERROR)
-            .remove(KEY_DAILY_CONFIRMED_DAY_START_MS)
-            .remove(KEY_DAILY_PROMPTED_DAY_START_MS)
-            .remove(KEY_DAILY_ALERTED_DAY_START_MS)
-            .commit()
+        preferences.edit(commit = true) {
+            putBoolean(KEY_DAILY_CHECK_IN_ENABLED, true)
+            putInt(KEY_DAILY_CHECK_IN_HOUR, normalizedHour)
+            putLong(KEY_DAILY_NEXT_DUE_AT_MS, nextDueAtMs)
+            remove(KEY_DAILY_PROMPTED_DUE_AT_MS)
+            remove(KEY_DAILY_ALERTED_DUE_AT_MS)
+            remove(KEY_DAILY_RESPONSE_DEADLINE_AT_MS)
+            remove(KEY_DAILY_CHECK_IN_ERROR)
+            remove(KEY_DAILY_CONFIRMED_DAY_START_MS)
+            remove(KEY_DAILY_PROMPTED_DAY_START_MS)
+            remove(KEY_DAILY_ALERTED_DAY_START_MS)
+        }
         nextDueAtMs
     }
 
@@ -499,7 +503,7 @@ class MonitoringStore(context: Context) {
         if (!dailyCheckInEnabled) return@synchronized 0L
         if (dailyNextDueAtMs > 0L) return@synchronized dailyNextDueAtMs
         val dueAtMs = DailyCheckInCalculator.nextDueAt(nowMs, dailyCheckInHour)
-        preferences.edit().putLong(KEY_DAILY_NEXT_DUE_AT_MS, dueAtMs).commit()
+        preferences.edit(commit = true) { putLong(KEY_DAILY_NEXT_DUE_AT_MS, dueAtMs) }
         dueAtMs
     }
 
@@ -515,26 +519,27 @@ class MonitoringStore(context: Context) {
         if (hasActivePrompt) return@synchronized currentDueAtMs
 
         val recalculatedDueAtMs = DailyCheckInCalculator.nextDueAt(nowMs, dailyCheckInHour)
-        preferences.edit()
-            .putLong(KEY_DAILY_NEXT_DUE_AT_MS, recalculatedDueAtMs)
-            .remove(KEY_DAILY_PROMPTED_DUE_AT_MS)
-            .remove(KEY_DAILY_ALERTED_DUE_AT_MS)
-            .remove(KEY_DAILY_RESPONSE_DEADLINE_AT_MS)
-            .commit()
+        preferences.edit(commit = true) {
+            putLong(KEY_DAILY_NEXT_DUE_AT_MS, recalculatedDueAtMs)
+            remove(KEY_DAILY_PROMPTED_DUE_AT_MS)
+            remove(KEY_DAILY_ALERTED_DUE_AT_MS)
+            remove(KEY_DAILY_RESPONSE_DEADLINE_AT_MS)
+        }
         recalculatedDueAtMs
     }
     @SuppressLint("ApplySharedPref")
     fun deferDailyCheckInToNow(nowMs: Long = System.currentTimeMillis()): Long = synchronized(DAILY_LOCK) {
-        preferences.edit()
-            .putLong(KEY_DAILY_NEXT_DUE_AT_MS, nowMs)
-            .remove(KEY_DAILY_PROMPTED_DUE_AT_MS)
-            .remove(KEY_DAILY_ALERTED_DUE_AT_MS)
-            .remove(KEY_DAILY_RESPONSE_DEADLINE_AT_MS)
-            .commit()
+        preferences.edit(commit = true) {
+            putLong(KEY_DAILY_NEXT_DUE_AT_MS, nowMs)
+            remove(KEY_DAILY_PROMPTED_DUE_AT_MS)
+            remove(KEY_DAILY_ALERTED_DUE_AT_MS)
+            remove(KEY_DAILY_RESPONSE_DEADLINE_AT_MS)
+        }
         nowMs
     }
 
-    @SuppressLint("ApplySharedPref")
+    // Do not replace the persisted-success Boolean with KTX's Unit result.
+    @SuppressLint("ApplySharedPref", "UseKtx")
     fun markDailyCheckInPrompted(
         dueAtMs: Long,
         nowMs: Long = System.currentTimeMillis(),
@@ -572,13 +577,14 @@ class MonitoringStore(context: Context) {
 
     fun markDailyCheckInAlerted(dueAtMs: Long) = synchronized(DAILY_LOCK) {
         if (!dailyCheckInEnabled || dailyNextDueAtMs != dueAtMs) return@synchronized
-        preferences.edit().putLong(KEY_DAILY_ALERTED_DUE_AT_MS, dueAtMs).apply()
+        preferences.edit { putLong(KEY_DAILY_ALERTED_DUE_AT_MS, dueAtMs) }
     }
 
     fun wasDailyCheckInAlerted(dueAtMs: Long): Boolean =
         preferences.getLong(KEY_DAILY_ALERTED_DUE_AT_MS, 0L) == dueAtMs
 
-    @SuppressLint("ApplySharedPref")
+    // The caller advances only after commit succeeds, not merely after an edit was requested.
+    @SuppressLint("ApplySharedPref", "UseKtx")
     fun advanceDailyCheckIn(completedDueAtMs: Long, notBeforeMs: Long = completedDueAtMs): Boolean = synchronized(DAILY_LOCK) {
         if (!dailyCheckInEnabled || dailyNextDueAtMs != completedDueAtMs) return@synchronized false
         val nextDueAtMs = DailyCheckInCalculator.nextDueAfter(completedDueAtMs, dailyCheckInHour)
@@ -594,7 +600,7 @@ class MonitoringStore(context: Context) {
     @SuppressLint("ApplySharedPref")
     fun beginSos(nowMs: Long = System.currentTimeMillis()): Long = synchronized(SOS_LOCK) {
         if (sosEventMs > 0L) return@synchronized sosEventMs
-        preferences.edit().putLong(KEY_PENDING_SOS_EVENT_MS, nowMs).commit()
+        preferences.edit(commit = true) { putLong(KEY_PENDING_SOS_EVENT_MS, nowMs) }
         nowMs
     }
 
@@ -611,14 +617,15 @@ class MonitoringStore(context: Context) {
         if (pending <= 0L || pending > nowMs ||
             (expectedEventMs != null && pending != expectedEventMs)
         ) return@synchronized null
-        preferences.edit()
-            .remove(KEY_PENDING_SOS_EVENT_MS)
-            .putLong(KEY_ACTIVE_SOS_EVENT_MS, pending)
-            .commit()
+        preferences.edit(commit = true) {
+            remove(KEY_PENDING_SOS_EVENT_MS)
+            putLong(KEY_ACTIVE_SOS_EVENT_MS, pending)
+        }
         pending
     }
 
-    @SuppressLint("ApplySharedPref")
+    // SOS cancellation must report actual durable commit success.
+    @SuppressLint("ApplySharedPref", "UseKtx")
     fun cancelPendingSos(): Boolean = synchronized(SOS_LOCK) {
         if (pendingSosEventMs <= 0L) return@synchronized false
         preferences.edit().remove(KEY_PENDING_SOS_EVENT_MS).commit()
@@ -627,30 +634,30 @@ class MonitoringStore(context: Context) {
     fun completeActiveSos(eventMs: Long) {
         synchronized(SOS_LOCK) {
             if (activeSosEventMs == eventMs) {
-                preferences.edit().remove(KEY_ACTIVE_SOS_EVENT_MS).apply()
+                preferences.edit { remove(KEY_ACTIVE_SOS_EVENT_MS) }
             }
         }
     }
 
     fun clearSos() {
         synchronized(SOS_LOCK) {
-            preferences.edit()
-                .remove(KEY_PENDING_SOS_EVENT_MS)
-                .remove(KEY_ACTIVE_SOS_EVENT_MS)
-                .apply()
+            preferences.edit {
+                remove(KEY_PENDING_SOS_EVENT_MS)
+                remove(KEY_ACTIVE_SOS_EVENT_MS)
+            }
         }
     }
     fun markPreAlert(deadlineMs: Long, postNotification: () -> Boolean = { true }): Boolean = synchronized(ACTIVITY_LOCK) {
         if (!desiredEnabled || this.deadlineMs != deadlineMs || wasPreAlerted(deadlineMs)) return@synchronized false
         // Posting and resetting share the lock, so late work cannot restore a stale warning.
         if (!postNotification()) return@synchronized false
-        preferences.edit().putLong(KEY_PRE_ALERT_DEADLINE_MS, deadlineMs).apply()
+        preferences.edit { putLong(KEY_PRE_ALERT_DEADLINE_MS, deadlineMs) }
         true
     }
 
     fun markEmergency(eventMs: Long): Boolean = synchronized(ACTIVITY_LOCK) {
         if (inactivityEventMs != eventMs || wasEmergencyDispatched(eventMs)) return@synchronized false
-        preferences.edit().putLong(KEY_EMERGENCY_DEADLINE_MS, eventMs).apply()
+        preferences.edit { putLong(KEY_EMERGENCY_DEADLINE_MS, eventMs) }
         InactivityDeadlineScheduler(appContext).cancel()
         true
     }

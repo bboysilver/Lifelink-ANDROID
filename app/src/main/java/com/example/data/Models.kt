@@ -94,7 +94,15 @@ data class SafetyReviewItem(
     val sentRecipients: Int,
     val totalRecipients: Int,
     val followUpStatus: String?,
-    val followUpUpdatedAtMs: Long?
+    val followUpUpdatedAtMs: Long?,
+    val deliveredRecipients: Int = 0
+)
+
+// Read-only projection; never used to control dispatch or incident completion.
+data class RecentSmsRecord(
+    val eventId: String,
+    val dispatchState: String,
+    val updatedAtMs: Long
 )
 
 enum class FollowUpSaveResult { SAVED, UNCHANGED, EVENT_UNAVAILABLE }

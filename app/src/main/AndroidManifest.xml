@@ -1,10 +1,12 @@
 <?xml version="1.0" encoding="utf-8"?>
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
 
     <!-- The core safety path sends carrier SMS and therefore requires telephony hardware. -->
     <uses-feature
         android:name="android.hardware.telephony"
-        android:required="true" />
+        android:required="true"
+        tools:ignore="UnnecessaryRequiredFeature" />
 
     <uses-permission android:name="android.permission.SEND_SMS" />
     <uses-permission android:name="android.permission.READ_PHONE_STATE" />

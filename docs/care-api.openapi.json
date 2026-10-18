@@ -1,0 +1,179 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "LifeLink Care R2 - disabled contract scaffold",
+    "version": "0.1.0-draft",
+    "description": "Documentation only. No server, credentials or Android transport exists. Production activation requires separate consent, legal, security and institution approval. Device health never proves human safety."
+  },
+  "servers": [{"url": "https://care-api.invalid", "description": "Non-operational documentation host"}],
+  "security": [{"staffBearer": []}],
+  "paths": {
+    "/v1/device-links/redeem": {
+      "post": {
+        "operationId": "redeemLink",
+        "description": "Validate a single-use hashed invite, explicit consent and both-party approval. Pending links cannot upload. Tenant is resolved by the server, not supplied by the device.",
+        "security": [{"deviceBearer": []}],
+        "parameters": [{"$ref": "#/components/parameters/IdempotencyKey"}],
+        "requestBody": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/LinkRedemption"}}}},
+        "responses": {
+          "202": {"description": "Awaiting institution approval; no upload authority", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/LinkStatus"}}}},
+          "400": {"$ref": "#/components/responses/Invalid"},
+          "401": {"$ref": "#/components/responses/Unauthorized"},
+          "409": {"$ref": "#/components/responses/Conflict"},
+          "429": {"$ref": "#/components/responses/RateLimited"}
+        }
+      }
+    },
+    "/v1/device-links/current": {
+      "delete": {
+        "operationId": "revokeCurrentLink",
+        "description": "Idempotently revoke link and access; stop new sync. Local monitoring/SMS/SOS are unchanged. Deletion/limited lawful retention follows reviewed policy.",
+        "security": [{"deviceBearer": []}],
+        "responses": {"204": {"description": "Revoked or already absent"}, "401": {"$ref": "#/components/responses/Unauthorized"}}
+      }
+    },
+    "/v1/device-events/batch": {
+      "post": {
+        "operationId": "acceptDeviceEvents",
+        "description": "Active device link only; <=64KiB body. Unique tenant/client/deviceIncidentId identifies one incident. Event IDs and monotonic sequence make replay and out-of-order status updates safe. ACK is not SMS delivery or human confirmation.",
+        "security": [{"deviceBearer": []}],
+        "parameters": [{"$ref": "#/components/parameters/IdempotencyKey"}],
+        "requestBody": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/EventBatch"}}}},
+        "responses": {
+          "200": {"description": "Accepted/deduplicated", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/BatchReceipt"}}}},
+          "400": {"$ref": "#/components/responses/Invalid"},
+          "401": {"$ref": "#/components/responses/Unauthorized"},
+          "403": {"$ref": "#/components/responses/Forbidden"},
+          "409": {"$ref": "#/components/responses/Conflict"},
+          "413": {"description": "Body exceeds limit"},
+          "429": {"$ref": "#/components/responses/RateLimited"}
+        }
+      }
+    },
+    "/v1/devices/heartbeat": {
+      "post": {
+        "operationId": "acceptHeartbeat",
+        "description": "Active linked device only. Record server receivedAt. A stale signal means unverified connectivity, never a specific failure cause or proof of safety.",
+        "security": [{"deviceBearer": []}],
+        "parameters": [{"$ref": "#/components/parameters/IdempotencyKey"}],
+        "requestBody": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Heartbeat"}}}},
+        "responses": {"204": {"description": "Recorded"}, "400": {"$ref": "#/components/responses/Invalid"}, "401": {"$ref": "#/components/responses/Unauthorized"}, "403": {"$ref": "#/components/responses/Forbidden"}, "429": {"$ref": "#/components/responses/RateLimited"}}
+      }
+    },
+    "/v1/incidents": {
+      "get": {
+        "operationId": "listIncidents",
+        "x-required-roles": ["ORG_ADMIN", "CARE_WORKER"],
+        "description": "Server-enforced tenant and assigned-client scope, including cursor pagination. Revoked links inaccessible. No client-controlled tenant override.",
+        "parameters": [
+          {"$ref": "#/components/parameters/PageSize"}, {"$ref": "#/components/parameters/Cursor"},
+          {"in": "query", "name": "status", "schema": {"$ref": "#/components/schemas/CareStatus"}}
+        ],
+        "responses": {"200": {"description": "Scoped list", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/IncidentPage"}}}}, "401": {"$ref": "#/components/responses/Unauthorized"}, "403": {"$ref": "#/components/responses/Forbidden"}}
+      }
+    },
+    "/v1/incidents/{id}/actions": {
+      "post": {
+        "operationId": "recordHumanAction",
+        "x-required-roles": ["ORG_ADMIN", "CARE_WORKER"],
+        "description": "Tenant and assignment checked transactionally. Actor/time from server authentication. Explicit actual phone/visit confirmation required for SAFE_CONFIRMED; no automated transition from SMS/device activity. Local SMS retry is unaffected.",
+        "parameters": [{"$ref": "#/components/parameters/IncidentId"}, {"$ref": "#/components/parameters/IdempotencyKey"}],
+        "requestBody": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/HumanAction"}}}},
+        "responses": {
+          "200": {"description": "Updated with audit trail", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Incident"}}}},
+          "400": {"$ref": "#/components/responses/Invalid"}, "401": {"$ref": "#/components/responses/Unauthorized"}, "404": {"$ref": "#/components/responses/NotFound"},
+          "409": {"description": "Revision conflict; do not auto-overwrite", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/RevisionConflict"}}}}
+        }
+      }
+    },
+    "/v1/clients": {
+      "get": {
+        "operationId": "listAssignedClients",
+        "x-required-roles": ["ORG_ADMIN", "CARE_WORKER"],
+        "description": "Pseudonymous assigned clients only; tenant isolation also applies to search and cursors.",
+        "parameters": [{"$ref": "#/components/parameters/PageSize"}, {"$ref": "#/components/parameters/Cursor"}],
+        "responses": {"200": {"description": "Scoped list", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/ClientPage"}}}}, "401": {"$ref": "#/components/responses/Unauthorized"}, "403": {"$ref": "#/components/responses/Forbidden"}}
+      }
+    },
+    "/v1/audit-events": {
+      "get": {
+        "operationId": "listTenantAudit",
+        "x-required-roles": ["ORG_ADMIN"],
+        "description": "Tenant admin only, access itself audited. No universal operations backdoor. No tokens, message bodies or contact details in audit records.",
+        "parameters": [{"$ref": "#/components/parameters/PageSize"}, {"$ref": "#/components/parameters/Cursor"}],
+        "responses": {"200": {"description": "Scoped audit list", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/AuditPage"}}}}, "401": {"$ref": "#/components/responses/Unauthorized"}, "403": {"$ref": "#/components/responses/Forbidden"}}
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "staffBearer": {"type": "http", "scheme": "bearer", "bearerFormat": "JWT", "description": "Reviewed OIDC provider; validate signature, issuer, audience, lifetime, tenant and assignment server-side. Provider not yet selected."},
+      "deviceBearer": {"type": "http", "scheme": "bearer", "bearerFormat": "JWT", "description": "Device enrollment and link-bound credentials not yet implemented. Active approved link required for upload; revoked/pending links cannot write."}
+    },
+    "parameters": {
+      "IdempotencyKey": {"in": "header", "name": "Idempotency-Key", "required": true, "schema": {"type": "string", "minLength": 22, "maxLength": 128, "pattern": "^[A-Za-z0-9_-]+$"}},
+      "PageSize": {"in": "query", "name": "limit", "schema": {"type": "integer", "minimum": 1, "maximum": 100, "default": 50}},
+      "Cursor": {"in": "query", "name": "cursor", "schema": {"type": "string", "maxLength": 512}},
+      "IncidentId": {"in": "path", "name": "id", "required": true, "schema": {"$ref": "#/components/schemas/OpaqueId"}}
+    },
+    "responses": {
+      "Invalid": {"description": "Invalid enum/schema/body; never echo private payload", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}}},
+      "Unauthorized": {"description": "Invalid/expired/revoked credentials", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}}},
+      "Forbidden": {"description": "No active approved link or role", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}}},
+      "NotFound": {"description": "Not found or out of tenant/assignment scope; indistinguishable", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}}},
+      "Conflict": {"description": "Idempotency key reused with different payload or invite consumed", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}}},
+      "RateLimited": {"description": "Rate limited; honor Retry-After", "headers": {"Retry-After": {"schema": {"type": "integer", "minimum": 1}}}}
+    },
+    "schemas": {
+      "OpaqueId": {"type": "string", "format": "uuid"},
+      "SmsState": {"type": "string", "enum": ["QUEUED", "SENT", "DELIVERED", "FAILED_RETRYABLE", "FAILED_FINAL", "UNKNOWN"]},
+      "CareStatus": {"type": "string", "enum": ["NEEDS_REVIEW", "CONTACTING", "SAFE_CONFIRMED", "ESCALATION_REQUIRED", "RESOLVED"]},
+      "MonitoringHealth": {"type": "string", "enum": ["RUNNING", "STOPPED", "UNVERIFIED"]},
+      "LinkRedemption": {
+        "type": "object", "additionalProperties": false, "required": ["invitationCode", "consentVersion", "userConsented"],
+        "properties": {"invitationCode": {"type": "string", "minLength": 32, "maxLength": 128, "pattern": "^[A-Za-z0-9_-]+$"}, "consentVersion": {"type": "string", "minLength": 1, "maxLength": 32}, "userConsented": {"type": "boolean", "const": true}}
+      },
+      "LinkStatus": {
+        "type": "object", "additionalProperties": false, "required": ["linkId", "status"],
+        "properties": {"linkId": {"$ref": "#/components/schemas/OpaqueId"}, "status": {"type": "string", "const": "PENDING_APPROVAL"}}
+      },
+      "DeviceEvent": {
+        "type": "object", "additionalProperties": false,
+        "required": ["schemaVersion", "deviceEventId", "deviceIncidentId", "sequence", "eventKind", "observedAt", "smsState"],
+        "properties": {
+          "schemaVersion": {"type": "integer", "const": 1}, "deviceEventId": {"$ref": "#/components/schemas/OpaqueId"},
+          "deviceIncidentId": {"type": "string", "minLength": 1, "maxLength": 128, "pattern": "^(emergency|daily|sos):[0-9]+$", "description": "Stable existing local incident key; no user or recipient details"},
+          "sequence": {"type": "integer", "minimum": 1},
+          "eventKind": {"type": "string", "enum": ["INACTIVITY_ALERT", "DAILY_CHECK_IN_MISSED", "SOS"]},
+          "observedAt": {"type": "string", "format": "date-time"}, "smsState": {"$ref": "#/components/schemas/SmsState"}
+        }
+      },
+      "EventBatch": {"type": "object", "additionalProperties": false, "required": ["events"], "properties": {"events": {"type": "array", "minItems": 1, "maxItems": 50, "items": {"$ref": "#/components/schemas/DeviceEvent"}}}},
+      "BatchReceipt": {"type": "object", "additionalProperties": false, "required": ["receivedAt", "accepted", "duplicates"], "properties": {"receivedAt": {"type": "string", "format": "date-time"}, "accepted": {"type": "integer", "minimum": 0, "maximum": 50}, "duplicates": {"type": "integer", "minimum": 0, "maximum": 50}}},
+      "Heartbeat": {
+        "type": "object", "additionalProperties": false, "required": ["observedAt", "monitoringHealth", "smsCapability", "appVersion"],
+        "properties": {
+          "observedAt": {"type": "string", "format": "date-time"}, "monitorHeartbeatAt": {"type": "string", "format": "date-time"},
+          "monitoringHealth": {"$ref": "#/components/schemas/MonitoringHealth"}, "smsCapability": {"type": "string", "enum": ["READY", "BLOCKED", "UNKNOWN"]},
+          "errorCode": {"type": "string", "enum": ["PERMISSION_REQUIRED", "SIM_UNAVAILABLE", "SENSOR_UNAVAILABLE", "UNKNOWN"]}, "appVersion": {"type": "string", "minLength": 1, "maxLength": 32}
+        }
+      },
+      "HumanAction": {
+        "type": "object", "additionalProperties": false, "required": ["expectedRevision", "action"],
+        "properties": {"expectedRevision": {"type": "integer", "minimum": 0}, "action": {"type": "string", "enum": ["CONTACTING", "SAFE_CONFIRMED", "ESCALATION_REQUIRED", "RESOLVED"]}, "humanConfirmed": {"type": "boolean", "const": true}, "contactMethod": {"type": "string", "enum": ["PHONE", "VISIT"]}, "noteCode": {"type": "string", "enum": ["CONTACT_ATTEMPTED", "DIRECT_CONTACT", "FOLLOW_UP_REQUIRED", "FOLLOW_UP_COMPLETED"]}},
+        "if": {"properties": {"action": {"const": "SAFE_CONFIRMED"}}}, "then": {"required": ["humanConfirmed", "contactMethod"]}
+      },
+      "Incident": {
+        "type": "object", "additionalProperties": false, "required": ["id", "clientId", "observedAt", "receivedAt", "smsState", "careStatus", "revision"],
+        "properties": {"id": {"$ref": "#/components/schemas/OpaqueId"}, "clientId": {"$ref": "#/components/schemas/OpaqueId"}, "observedAt": {"type": "string", "format": "date-time"}, "receivedAt": {"type": "string", "format": "date-time"}, "smsState": {"$ref": "#/components/schemas/SmsState"}, "careStatus": {"$ref": "#/components/schemas/CareStatus"}, "revision": {"type": "integer", "minimum": 0}}
+      },
+      "RevisionConflict": {"type": "object", "additionalProperties": false, "required": ["code", "current"], "properties": {"code": {"type": "string", "const": "REVISION_CONFLICT"}, "current": {"$ref": "#/components/schemas/Incident"}}},
+      "Client": {"type": "object", "additionalProperties": false, "required": ["id", "pseudonym", "connection"], "properties": {"id": {"$ref": "#/components/schemas/OpaqueId"}, "pseudonym": {"type": "string", "minLength": 1, "maxLength": 32}, "connection": {"type": "string", "enum": ["RECENT_SIGNAL", "UNVERIFIED"]}, "lastSeenAt": {"type": "string", "format": "date-time"}}},
+      "AuditEvent": {"type": "object", "additionalProperties": false, "required": ["id", "actorId", "targetId", "operation", "recordedAt", "requestId"], "properties": {"id": {"$ref": "#/components/schemas/OpaqueId"}, "actorId": {"$ref": "#/components/schemas/OpaqueId"}, "targetId": {"$ref": "#/components/schemas/OpaqueId"}, "operation": {"type": "string", "enum": ["LINK_APPROVED", "LINK_REVOKED", "ACTION_RECORDED", "ASSIGNMENT_CHANGED", "AUDIT_VIEWED", "DATA_DELETED"]}, "recordedAt": {"type": "string", "format": "date-time"}, "requestId": {"$ref": "#/components/schemas/OpaqueId"}}},
+      "IncidentPage": {"type": "object", "additionalProperties": false, "required": ["items"], "properties": {"items": {"type": "array", "maxItems": 100, "items": {"$ref": "#/components/schemas/Incident"}}, "nextCursor": {"type": "string", "maxLength": 512}}},
+      "ClientPage": {"type": "object", "additionalProperties": false, "required": ["items"], "properties": {"items": {"type": "array", "maxItems": 100, "items": {"$ref": "#/components/schemas/Client"}}, "nextCursor": {"type": "string", "maxLength": 512}}},
+      "AuditPage": {"type": "object", "additionalProperties": false, "required": ["items"], "properties": {"items": {"type": "array", "maxItems": 100, "items": {"$ref": "#/components/schemas/AuditEvent"}}, "nextCursor": {"type": "string", "maxLength": 512}}},
+      "Error": {"type": "object", "additionalProperties": false, "required": ["code", "requestId"], "properties": {"code": {"type": "string", "enum": ["UNAUTHORIZED", "FORBIDDEN", "NOT_FOUND", "INVALID_REQUEST", "CONFLICT", "RATE_LIMITED"]}, "requestId": {"$ref": "#/components/schemas/OpaqueId"}}}
+    }
+  }
+}

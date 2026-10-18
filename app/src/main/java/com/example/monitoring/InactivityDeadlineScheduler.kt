@@ -4,6 +4,7 @@ import android.app.AlarmManager
 import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
+import androidx.core.content.edit
 import com.example.data.DeadlineCalculator
 import com.example.data.MonitoringStore
 
@@ -34,12 +35,15 @@ class InactivityDeadlineScheduler(context: Context) {
             else -> nowMs + RETRY_MS
         }
         alarms.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, trigger, pendingIntent(deadline))
-        preferences.edit().putLong("deadline", deadline).putLong("trigger", trigger).apply()
+        preferences.edit {
+            putLong("deadline", deadline)
+            putLong("trigger", trigger)
+        }
     }
 
     fun cancel() = synchronized(LOCK) {
         alarms.cancel(pendingIntent(0L))
-        preferences.edit().clear().apply()
+        preferences.edit { clear() }
     }
 
     private fun pendingIntent(deadline: Long): PendingIntent = PendingIntent.getBroadcast(

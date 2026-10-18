@@ -14,6 +14,7 @@ import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import androidx.core.app.ServiceCompat
 import androidx.core.content.ContextCompat
+import androidx.core.net.toUri
 import androidx.work.CoroutineWorker
 import androidx.work.Data
 import androidx.work.ExistingWorkPolicy
@@ -154,7 +155,7 @@ class SosService : Service() {
             if (cancellable) {
                 builder.setOngoing(true).addAction(0, "SOS 취소", PendingIntent.getService(
                     context, 4, Intent(context, SosService::class.java).setAction(ACTION_CANCEL)
-                        .setData(android.net.Uri.parse("lifelink://cancel-sos/${MonitoringStore(context).pendingSosEventMs}"))
+                        .setData("lifelink://cancel-sos/${MonitoringStore(context).pendingSosEventMs}".toUri())
                         .putExtra(EXTRA_EVENT_MS, MonitoringStore(context).pendingSosEventMs),
                     PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
                 ))

@@ -11,6 +11,7 @@ class LifeLinkRepository(private val db: AppDatabase) {
     val allLogs: Flow<List<EventLog>> = db.eventLogDao().getAllEventLogs()
     val lastSmsSentAt: Flow<Long?> = db.eventLogDao().getLastSmsSentAt()
     val recentSafetyReviews: Flow<List<SafetyReviewItem>> = db.safetyIncidentDao().getRecentReviews()
+    val latestSmsRecord: Flow<RecentSmsRecord?> = db.safetyIncidentDao().getLatestSmsRecord()
 
     // Preferences / Settings Keys
     companion object {

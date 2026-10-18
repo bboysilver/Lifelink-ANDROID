@@ -5,10 +5,13 @@ import android.content.Context
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.hasText
+import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performScrollToNode
+import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollTo
 import androidx.lifecycle.ViewModelStore
 import androidx.test.core.app.ApplicationProvider
 import androidx.work.testing.WorkManagerTestInitHelper
@@ -18,6 +21,7 @@ import org.junit.After
 import org.junit.Before
 import org.junit.Rule
 import org.junit.Test
+import org.junit.Assert.assertFalse
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
@@ -51,5 +55,20 @@ class DashboardUiTest {
         composeRule.onNodeWithText("Life Link Family", substring = true).assertDoesNotExist()
         composeRule.onNodeWithText("무료 체험 예정", substring = true).assertDoesNotExist()
         composeRule.onNodeWithText(LifeLinkFamilyPlan.monthlyPriceLabel, substring = true).assertDoesNotExist()
+    }
+
+    @Test fun diagnosticsRoutesToFieldVisitWithoutRestartingSetup() {
+        var setupRestarted = false
+        composeRule.setContent {
+            MaterialTheme {
+                DashboardTab(viewModel, SafetyPermissions(false, false, false, false),
+                    SmsSetupState.Blocked(SmsSetupIssue.NO_ACTIVE_SIM), {}, {}, {}, {}, { setupRestarted = true })
+            }
+        }
+        composeRule.onNodeWithTag("dashboard_list").performScrollToNode(hasTestTag("open_diagnostics"))
+        composeRule.onNodeWithTag("open_diagnostics").performClick()
+        composeRule.onNodeWithTag("open_field_visit").performScrollTo().performClick()
+        composeRule.onNodeWithText("현장 방문 · 기기 상태 점검").assertIsDisplayed()
+        composeRule.runOnIdle { assertFalse(setupRestarted) }
     }
 }

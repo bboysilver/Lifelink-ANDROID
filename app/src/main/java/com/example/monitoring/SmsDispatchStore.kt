@@ -3,6 +3,7 @@ package com.example.monitoring
 import android.annotation.SuppressLint
 import android.app.Activity
 import android.content.Context
+import androidx.core.content.edit
 
 enum class SmsDispatchState {
     NOT_QUEUED,
@@ -67,16 +68,16 @@ class SmsDispatchStore(context: Context) {
         val attempt = current.attempt + 1
         val eventIds = preferences.getStringSet(KEY_EVENT_IDS, emptySet()).orEmpty().toMutableSet()
         eventIds += eventId
-        preferences.edit()
-            .putStringSet(KEY_EVENT_IDS, eventIds)
-            .putString(stateKey(eventId), SmsDispatchState.QUEUED.name)
-            .putInt(attemptKey(eventId), attempt)
-            .putInt(maxAttemptsKey(eventId), policy.maxAttempts)
-            .putInt(totalPartsKey(eventId), totalParts)
-            .putLong(updatedAtKey(eventId), nowMs)
-            .putLong(retryAtKey(eventId), 0L)
-            .putInt(resultCodeKey(eventId), Activity.RESULT_OK)
-            .commit()
+        preferences.edit(commit = true) {
+            putStringSet(KEY_EVENT_IDS, eventIds)
+            putString(stateKey(eventId), SmsDispatchState.QUEUED.name)
+            putInt(attemptKey(eventId), attempt)
+            putInt(maxAttemptsKey(eventId), policy.maxAttempts)
+            putInt(totalPartsKey(eventId), totalParts)
+            putLong(updatedAtKey(eventId), nowMs)
+            putLong(retryAtKey(eventId), 0L)
+            putInt(resultCodeKey(eventId), Activity.RESULT_OK)
+        }
         attempt
     }
 
@@ -139,16 +140,16 @@ class SmsDispatchStore(context: Context) {
             return@synchronized markFailureLocked(eventId, attempt, resultCode, nowMs)
         }
         if (stage == SmsCallbackStage.DELIVERED && resultCode != Activity.RESULT_OK) {
-            preferences.edit()
-                .putLong(updatedAtKey(eventId), nowMs)
-                .putInt(resultCodeKey(eventId), resultCode)
-                .commit()
+            preferences.edit(commit = true) {
+                putLong(updatedAtKey(eventId), nowMs)
+                putInt(resultCodeKey(eventId), resultCode)
+            }
             return@synchronized SmsCallbackOutcome.DELIVERY_UNCONFIRMED
         }
 
         val confirmedPartKey = partKey(stage, eventId, attempt, partIndex)
         if (preferences.getBoolean(confirmedPartKey, false)) return@synchronized SmsCallbackOutcome.IGNORED
-        preferences.edit().putBoolean(confirmedPartKey, true).commit()
+        preferences.edit(commit = true) { putBoolean(confirmedPartKey, true) }
         val allPartsConfirmed = (0 until totalParts).all {
             preferences.getBoolean(partKey(stage, eventId, attempt, it), false)
         }
@@ -159,12 +160,12 @@ class SmsDispatchStore(context: Context) {
         } else {
             SmsDispatchState.DELIVERED
         }
-        preferences.edit()
-            .putString(stateKey(eventId), newState.name)
-            .putLong(updatedAtKey(eventId), nowMs)
-            .putLong(retryAtKey(eventId), 0L)
-            .putInt(resultCodeKey(eventId), resultCode)
-            .commit()
+        preferences.edit(commit = true) {
+            putString(stateKey(eventId), newState.name)
+            putLong(updatedAtKey(eventId), nowMs)
+            putLong(retryAtKey(eventId), 0L)
+            putInt(resultCodeKey(eventId), resultCode)
+        }
         if (newState == SmsDispatchState.SENT) SmsCallbackOutcome.SENT else SmsCallbackOutcome.DELIVERED
     }
 
@@ -175,7 +176,7 @@ class SmsDispatchStore(context: Context) {
                 val remaining = TEST_SMS_COOLDOWN_MS - (nowMs - preferences.getLong(key, 0L))
                 if (remaining > 0L) return@synchronized remaining
             }
-            preferences.edit().putLong(key, nowMs).commit()
+            preferences.edit(commit = true) { putLong(key, nowMs) }
             0L
         }
 
@@ -186,6 +187,8 @@ class SmsDispatchStore(context: Context) {
         pruneExpiredLocked(nowMs, preserveEventIds)
     }
 
+    // Share this editor with the per-part cleanup helper, then commit the batch once.
+    @SuppressLint("UseKtx")
     fun clearResolved() = synchronized(LOCK) {
         val eventIds = preferences.getStringSet(KEY_EVENT_IDS, emptySet()).orEmpty()
         // Safety callbacks and retries can outlive visible history. Their non-PII
@@ -199,6 +202,8 @@ class SmsDispatchStore(context: Context) {
         editor.putStringSet(KEY_EVENT_IDS, eventIds - resolvedIds.toSet()).commit()
     }
 
+    // Preserve this API's actual Boolean commit result (KTX edit returns Unit).
+    @SuppressLint("UseKtx")
     fun clearAll() = synchronized(LOCK) {
         preferences.edit().clear().commit()
     }
@@ -212,15 +217,17 @@ class SmsDispatchStore(context: Context) {
         val current = statusLocked(eventId)
         val retryable = attempt < current.maxAttempts
         val state = if (retryable) SmsDispatchState.FAILED_RETRYABLE else SmsDispatchState.FAILED_FINAL
-        preferences.edit()
-            .putString(stateKey(eventId), state.name)
-            .putLong(updatedAtKey(eventId), nowMs)
-            .putLong(retryAtKey(eventId), if (retryable) nowMs + RETRY_DELAY_MS else 0L)
-            .putInt(resultCodeKey(eventId), resultCode)
-            .commit()
+        preferences.edit(commit = true) {
+            putString(stateKey(eventId), state.name)
+            putLong(updatedAtKey(eventId), nowMs)
+            putLong(retryAtKey(eventId), if (retryable) nowMs + RETRY_DELAY_MS else 0L)
+            putInt(resultCodeKey(eventId), resultCode)
+        }
         return if (retryable) SmsCallbackOutcome.FAILED_RETRYABLE else SmsCallbackOutcome.FAILED_FINAL
     }
 
+    // The cleanup helper mutates one shared editor; the complete prune commits once.
+    @SuppressLint("UseKtx")
     private fun pruneExpiredLocked(nowMs: Long, preserveEventIds: Set<String>): Int {
         val eventIds = preferences.getStringSet(KEY_EVENT_IDS, emptySet()).orEmpty()
         val expired = eventIds.filter { eventId ->

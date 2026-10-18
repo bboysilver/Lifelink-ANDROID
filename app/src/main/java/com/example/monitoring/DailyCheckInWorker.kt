@@ -10,6 +10,7 @@ import android.os.SystemClock
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
+import androidx.core.net.toUri
 import androidx.work.CoroutineWorker
 import androidx.work.Data
 import androidx.work.ExistingWorkPolicy
@@ -349,7 +350,7 @@ internal class DailyCheckInTask(
             2,
             Intent(appContext, DailyCheckInReceiver::class.java)
                 .setAction(DailyCheckInReceiver.ACTION_SAFE)
-                .setData(android.net.Uri.parse("lifelink://daily-response/$dueAtMs"))
+                .setData("lifelink://daily-response/$dueAtMs".toUri())
                 .putExtra(DailyCheckInReceiver.EXTRA_DUE_AT, dueAtMs),
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )

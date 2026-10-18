@@ -4,6 +4,9 @@ LifeLink는 일정 시간 동안 휴대전화 활동이 감지되지 않으면 �
 
 ## 현재 구현
 
+- 2.3.5 (43) R1 현장 파일럿: `안심 > 작동 상태 점검 > 현장 점검·요약 공유`에서 실제 기기 상태·최근 시험/실제 SMS 결과·임시 준비 체크리스트를 확인합니다. 개인 안전 판정이나 기관 관제 기능이 아닙니다.
+- 점검 요약은 개인정보를 제외한 미리보기와 개별 동의 후 Android 공유창으로만 수동 공유합니다. 기존 사용자 이름은 가져오지 않으며 임시 점검 코드도 기본 제외됩니다. R1에 네트워크·새 권한·서버를 추가하지 않았습니다.
+- 가족 기록은 상태별 필터와 사건 발생 시각 정렬을 제공하며, SMS 발송/전달과 이 단말에 직접 기록한 메모를 구분합니다.
 - `작동 상태 점검`에서 실제 서비스 응답, 마지막 감지 활동, 마지막 SMS 발송 확인(시험 문자 포함), 센서 지원·권한·SIM·배터리 제한을 확인합니다. 센서 존재나 문자 전달을 사용자 안전·보호자 열람으로 표시하지 않습니다.
 - `간편 홈`을 선택하면 큰 무사 확인·SOS 버튼 중심으로 표시하고 시간 설정·구독 안내를 숨깁니다. 모니터링 설정과 동작은 변경하지 않으며 다시 끄면 기존 설정 화면을 볼 수 있습니다.
 - 무활동·안부 미응답 문자에는 발송 사유와 마지막 감지 활동 시각을 포함합니다. 시각 기록이 없으면 `기록 없음`으로 표시하며, 사건별 메시지를 고정해 재시도 중 본문은 바뀌지 않습니다.
@@ -50,7 +53,7 @@ LifeLink는 일정 시간 동안 휴대전화 활동이 감지되지 않으면 �
 
 ## 개발 빌드
 
-요구 사항은 Android Studio JBR(Java 21)와 Android SDK 36입니다. Android 16(API 36) Robolectric 테스트에는 Java 21이 필요하며 앱의 JVM 타깃은 17을 유지합니다.
+요구 사항은 Android Studio JBR(Java 21)와 Android SDK 37.0입니다. 최소 지원 API 24와 target API 36, 앱 JVM 타깃 17은 유지합니다. Kotlin/Compose compiler 2.4.21을 명시적으로 맞추며 Gradle 9.3.1과 AGP 9.1.1 호환 조합을 사용합니다.
 
 ```powershell
 .\gradlew.bat test lint assembleDebug
@@ -75,10 +78,12 @@ keyPassword=...
 
 Signed Android release 워크플로를 실행하려면 Actions secret에 ANDROID_UPLOAD_KEYSTORE_BASE64, ANDROID_UPLOAD_STORE_PASSWORD, ANDROID_UPLOAD_KEY_ALIAS, ANDROID_UPLOAD_KEY_PASSWORD를 등록하고 Repository Variable ANDROID_UPLOAD_CERT_SHA256에 업로드 인증서 지문을 설정합니다. 워크플로는 테스트와 lint를 실행하고 AAB 서명·인증서·SHA-256을 검증한 뒤 증빙 artifact로 보관합니다.
 
-릴리스 AAB는 `app/build/outputs/bundle/release/app-release.aab`에 생성됩니다. 앱 ID는 `com.bboysilver.lifelink`, 현재 버전은 `2.3.0 (38)`입니다. 기존 Play 앱에 올릴 때는 같은 업로드 인증서와 Play Console의 최신 versionCode보다 큰 번호를 사용해야 합니다.
+릴리스 AAB는 `app/build/outputs/bundle/release/app-release.aab`에 생성됩니다. 앱 ID는 `com.bboysilver.lifelink`, 현재 버전은 `2.3.6 (44)`입니다. 공개 출시 준비 완료를 뜻하지 않으며, 실제 Closed testing 제출 상태는 별도 배포 기록으로 확인합니다. 기존 Play 앱에 올릴 때는 같은 업로드 인증서와 Play Console의 최신 versionCode보다 큰 번호를 사용해야 합니다.
 
 최근 검토 결과와 정책·출시 조건은 [2026-10-03 검토](docs/review-2026-10-03.md)를 참고하세요.
 2.3.0 추가 기능과 베타 확인 항목은 [추가 기능 명세](docs/features-2.3.0.md)를 참고하세요.
+R1 범위·검증 결과는 [현장 파일럿 안내](docs/field-pilot-release-notes.md), 실기기 계획은 [수동 시험표](docs/field-pilot-test-plan.md), 서버/웹 미구현 R2는 [기관 연결 설계](docs/care-connected-design.md)를 참고하세요.
+2.3.6의 기존 경고 77개 처리·호환성·자동 검사 결과는 [검증 기록](docs/verification-2.3.6.md)을 참고하세요.
 
 ## 개인정보
 
