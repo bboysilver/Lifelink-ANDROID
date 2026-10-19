@@ -15,7 +15,7 @@ import android.util.Log
 import androidx.core.content.ContextCompat
 import kotlin.math.sqrt
 
-enum class SensorStartResult { STEP_DETECTOR, REPEATED_MOTION, FAILED }
+enum class SensorStartResult { STEP_DETECTOR, STEP_COUNTER, REPEATED_MOTION, FAILED }
 
 class SensorMonitor(
     private val context: Context,
@@ -23,11 +23,12 @@ class SensorMonitor(
 ) : SensorEventListener {
 
     private val sensorManager = context.getSystemService(Context.SENSOR_SERVICE) as SensorManager
-    private val stepDetector = sensorManager.getDefaultSensor(Sensor.TYPE_STEP_DETECTOR)
     private val accelerometer = sensorManager.getDefaultSensor(Sensor.TYPE_ACCELEROMETER)
     private val powerManager = context.getSystemService(PowerManager::class.java)
     private val keyguardManager = context.getSystemService(KeyguardManager::class.java)
     private val repeatedMotionDetector = RepeatedMotionDetector()
+    private val stepCounterDetector = RepeatedStepCounterDetector()
+    private val presenceDetector = UserPresenceDetector()
     private val repeatedStepDetector = RepeatedMotionDetector(
         requiredEvents = 3,
         minimumSpanMs = 2_000L,
@@ -40,24 +41,30 @@ class SensorMonitor(
     private var hasAccelerometerSample = false
     private var isRegistered = false
     private var stepsRegistered = false
+    private var counterRegistered = false
+    private var lastStepReportedMs = Long.MIN_VALUE
     private var startResult = SensorStartResult.FAILED
 
     private val statusReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context, intent: Intent?) {
-            ActivitySignalClassifier.reasonForBroadcast(intent?.action)?.let { reason ->
-                onActivityDetected(reason, System.currentTimeMillis())
+            when (intent?.action) {
+                Intent.ACTION_USER_PRESENT -> checkUserPresence(explicitUserPresent = true)
+                Intent.ACTION_SCREEN_ON, Intent.ACTION_SCREEN_OFF -> checkUserPresence()
             }
         }
     }
 
+    @Synchronized
     fun start(): SensorStartResult {
         if (isRegistered) return startResult
 
         resetDetectors()
-        stepsRegistered = registerSensor(stepDetector)
+        stepsRegistered = registerStepSensor(Sensor.TYPE_STEP_DETECTOR)
+        counterRegistered = registerStepSensor(Sensor.TYPE_STEP_COUNTER)
         val motionRegistered = registerSensor(accelerometer)
         startResult = when {
             stepsRegistered -> SensorStartResult.STEP_DETECTOR
+            counterRegistered -> SensorStartResult.STEP_COUNTER
             motionRegistered -> SensorStartResult.REPEATED_MOTION
             else -> SensorStartResult.FAILED
         }
@@ -70,23 +77,29 @@ class SensorMonitor(
             ContextCompat.registerReceiver(
                 context,
                 statusReceiver,
-                IntentFilter(Intent.ACTION_USER_PRESENT),
+                IntentFilter(Intent.ACTION_USER_PRESENT).apply {
+                    addAction(Intent.ACTION_SCREEN_ON)
+                    addAction(Intent.ACTION_SCREEN_OFF)
+                },
                 // USER_PRESENT is a protected system broadcast; some OEMs send it from System UI.
                 ContextCompat.RECEIVER_EXPORTED
             )
         } catch (error: RuntimeException) {
             sensorManager.unregisterListener(this)
             stepsRegistered = false
+            counterRegistered = false
             startResult = SensorStartResult.FAILED
             Log.e(TAG, "Unlock receiver registration failed", error)
             return startResult
         }
 
         isRegistered = true
+        presenceDetector.reset(keyguardManager.isKeyguardLocked, SystemClock.elapsedRealtime())
         Log.d(TAG, "Sensing engine started with $startResult")
         return startResult
     }
 
+    @Synchronized
     fun stop() {
         if (isRegistered) {
             sensorManager.unregisterListener(this)
@@ -98,11 +111,13 @@ class SensorMonitor(
         }
         isRegistered = false
         stepsRegistered = false
+        counterRegistered = false
         startResult = SensorStartResult.FAILED
         resetDetectors()
         Log.d(TAG, "Sensing engine stopped")
     }
 
+    @Synchronized
     override fun onSensorChanged(event: SensorEvent?) {
         if (!isRegistered || event == null) return
         val eventWallMs = SensorEventTime.toWallTimeMs(
@@ -111,19 +126,44 @@ class SensorMonitor(
         val eventElapsedMs = event.timestamp / 1_000_000L
         when (event.sensor?.type) {
             Sensor.TYPE_STEP_DETECTOR -> handleStep(eventElapsedMs, eventWallMs)
+            Sensor.TYPE_STEP_COUNTER -> event.values.firstOrNull()?.let { count ->
+                if (stepCounterDetector.record(count, eventElapsedMs)) {
+                    reportSteps("걸음 수 증가 감지", eventElapsedMs, eventWallMs)
+                }
+            }
             Sensor.TYPE_ACCELEROMETER -> handleAccelerometer(event, eventElapsedMs, eventWallMs)
         }
     }
 
     private fun handleStep(eventElapsedMs: Long, eventWallMs: Long) {
         if (repeatedStepDetector.record(eventElapsedMs)) {
-            onActivityDetected("반복된 걸음 감지", eventWallMs)
+            reportSteps("반복된 걸음 감지", eventElapsedMs, eventWallMs)
+        }
+    }
+
+    private fun reportSteps(reason: String, eventElapsedMs: Long, eventWallMs: Long) {
+        // Both step sensors can describe the same walk; keep one shared reporting cooldown.
+        if (lastStepReportedMs != Long.MIN_VALUE && eventElapsedMs - lastStepReportedMs < 60_000L) return
+        lastStepReportedMs = eventElapsedMs
+        onActivityDetected(reason, eventWallMs)
+    }
+
+    fun checkUserPresence() = checkUserPresence(explicitUserPresent = false)
+
+    @Synchronized
+    private fun checkUserPresence(explicitUserPresent: Boolean) {
+        if (!isRegistered) return
+        if (presenceDetector.record(
+                powerManager.isInteractive, keyguardManager.isKeyguardLocked,
+                explicitUserPresent, SystemClock.elapsedRealtime()
+            )) {
+            onActivityDetected("휴대전화 잠금 해제 감지", System.currentTimeMillis())
         }
     }
 
     private fun handleAccelerometer(event: SensorEvent, eventElapsedMs: Long, eventWallMs: Long) {
         // When steps are available, handset motion only supplements active, unlocked use.
-        if (stepsRegistered && (!powerManager.isInteractive || keyguardManager.isKeyguardLocked)) {
+        if ((stepsRegistered || counterRegistered) && (!powerManager.isInteractive || keyguardManager.isKeyguardLocked)) {
             repeatedMotionDetector.reset()
             hasAccelerometerSample = false
             return
@@ -148,6 +188,10 @@ class SensorMonitor(
 
     override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) = Unit
 
+    private fun registerStepSensor(type: Int): Boolean =
+        listOfNotNull(sensorManager.getDefaultSensor(type, true), sensorManager.getDefaultSensor(type))
+            .distinct().any { registerSensor(it) }
+
     private fun registerSensor(sensor: Sensor?): Boolean {
         if (sensor == null) return false
         return try {
@@ -161,6 +205,9 @@ class SensorMonitor(
     private fun resetDetectors() {
         repeatedMotionDetector.reset()
         repeatedStepDetector.reset()
+        stepCounterDetector.reset()
+        presenceDetector.reset()
+        lastStepReportedMs = Long.MIN_VALUE
         hasAccelerometerSample = false
         lastX = 0f
         lastY = 0f

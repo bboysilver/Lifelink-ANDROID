@@ -24,7 +24,8 @@ data class DiagnosticEnvironment(
     val notificationsGranted: Boolean,
     val hasActivitySensor: Boolean,
     val batteryPolicy: BatteryPolicy,
-    val airplaneModeEnabled: Boolean = false
+    val airplaneModeEnabled: Boolean = false,
+    val activitySensorSummary: String = "지원 정보 확인 필요"
 ) {
     val permissionsGranted: Boolean
         get() = smsGranted && phoneGranted && activityGranted && notificationsGranted
@@ -60,6 +61,13 @@ internal object SafetyDiagnosticsReader {
             PackageManager.PERMISSION_GRANTED
 
         val sensors = context.getSystemService(SensorManager::class.java)
+        val sensorNames = listOfNotNull(
+            "걸음 감지".takeIf { sensors?.getDefaultSensor(Sensor.TYPE_STEP_DETECTOR) != null ||
+                sensors?.getDefaultSensor(Sensor.TYPE_STEP_DETECTOR, true) != null },
+            "걸음 수".takeIf { sensors?.getDefaultSensor(Sensor.TYPE_STEP_COUNTER) != null ||
+                sensors?.getDefaultSensor(Sensor.TYPE_STEP_COUNTER, true) != null },
+            "움직임".takeIf { sensors?.getDefaultSensor(Sensor.TYPE_ACCELEROMETER) != null }
+        )
         val power = context.getSystemService(PowerManager::class.java)
         val backgroundRestricted = Build.VERSION.SDK_INT >= Build.VERSION_CODES.P &&
             context.getSystemService(ActivityManager::class.java)?.isBackgroundRestricted == true
@@ -69,8 +77,8 @@ internal object SafetyDiagnosticsReader {
             activityGranted = Build.VERSION.SDK_INT < Build.VERSION_CODES.Q ||
                 granted(Manifest.permission.ACTIVITY_RECOGNITION),
             notificationsGranted = SafetyNotificationCapability.canPost(context),
-            hasActivitySensor = sensors?.getDefaultSensor(Sensor.TYPE_STEP_DETECTOR) != null ||
-                sensors?.getDefaultSensor(Sensor.TYPE_ACCELEROMETER) != null,
+            hasActivitySensor = sensorNames.isNotEmpty(),
+            activitySensorSummary = sensorNames.joinToString(" · ").ifBlank { "지원 센서 없음" },
             airplaneModeEnabled = Settings.Global.getInt(
                 context.contentResolver, Settings.Global.AIRPLANE_MODE_ON, 0
             ) != 0,

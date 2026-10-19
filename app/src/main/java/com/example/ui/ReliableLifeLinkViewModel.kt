@@ -550,6 +550,7 @@ class LifeLinkViewModel(application: Application) : AndroidViewModel(application
 
     fun clearAllLogs() {
         smsDispatchStore.clearResolved()
+        monitoringStore.clearAutomaticActivity()
         viewModelScope.launch {
             repository.clearLogs()
             _familyNotice.value = "기록을 삭제했습니다. 진행 중인 문자 전송은 유지됩니다."

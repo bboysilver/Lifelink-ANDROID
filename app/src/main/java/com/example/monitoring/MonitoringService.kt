@@ -139,7 +139,7 @@ class MonitoringService : Service() {
         if (!store.desiredEnabled) return true
         if (!::sensorMonitor.isInitialized) {
             sensorMonitor = SensorMonitor(this) { reason, activityAtMs ->
-                store.recordActivity(activityAtMs, reason)
+                store.recordAutomaticActivity(activityAtMs, reason)
             }
         }
         if (sensorMonitor.start() != SensorStartResult.FAILED) return true
@@ -230,6 +230,9 @@ class MonitoringService : Service() {
                 firstPass = false
                 runMaintenanceIfNeeded()
                 if (store.desiredEnabled) {
+                    // Sample an observed lock-to-unlock transition if an OEM missed USER_PRESENT.
+                    // This does not treat screen-on, service restart, or an already-unlocked phone as activity.
+                    if (::sensorMonitor.isInitialized) sensorMonitor.checkUserPresence()
                     val nowMs = System.currentTimeMillis()
                     val elapsedMs = SystemClock.elapsedRealtime()
                     if (MonitoringUpdatePolicy.shouldWriteHeartbeat(lastHeartbeatWriteElapsedMs, elapsedMs)) {

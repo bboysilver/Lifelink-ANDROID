@@ -212,6 +212,102 @@ class SensorMonitorTest {
         shadowOf(sensorManager).addSensor(it)
     }
 
+    @Test fun counterOnlyPhoneCanDetectWalkingWithoutHistoricSteps() {
+        val counter = addSensor(Sensor.TYPE_STEP_COUNTER)
+        val events = mutableListOf<String>()
+        val monitor = SensorMonitor(context) { reason, _ -> events.add(reason) }
+        assertEquals(SensorStartResult.STEP_COUNTER, monitor.start())
+        val base = SystemClock.elapsedRealtimeNanos() - 10_000_000_000L
+        sendEvent(counter, base, 12_000f)
+        assertTrue(events.isEmpty())
+        for (index in 1..3) sendEvent(counter, base + index * 1_000_000_000L, 12_000f + index)
+        assertEquals(listOf("걸음 수 증가 감지"), events)
+        monitor.stop()
+    }
+
+    @Test fun walkingWhileLockedUsesStepsNotGeneralHandsetMotion() {
+        val steps = addSensor(Sensor.TYPE_STEP_DETECTOR)
+        val events = mutableListOf<String>()
+        val monitor = SensorMonitor(context) { reason, _ -> events.add(reason) }
+        monitor.start()
+        shadowOf(context.getSystemService(KeyguardManager::class.java)).setKeyguardLocked(true)
+        shadowOf(context.getSystemService(PowerManager::class.java)).setIsInteractive(false)
+        val base = SystemClock.elapsedRealtimeNanos() - 10_000_000_000L
+        repeat(3) { sendEvent(steps, base + it * 1_000_000_000L) }
+        assertEquals(listOf("반복된 걸음 감지"), events)
+        monitor.stop()
+    }
+
+    @Test fun stepSensorsDoNotReportTheSameWalkTwice() {
+        val steps = addSensor(Sensor.TYPE_STEP_DETECTOR)
+        val counter = addSensor(Sensor.TYPE_STEP_COUNTER)
+        val events = mutableListOf<String>()
+        val monitor = SensorMonitor(context) { reason, _ -> events.add(reason) }
+        monitor.start()
+        val base = SystemClock.elapsedRealtimeNanos() - 10_000_000_000L
+        sendEvent(counter, base, 100f)
+        repeat(3) { sendEvent(steps, base + it * 1_000_000_000L) }
+        sendEvent(counter, base + 3_000_000_000L, 103f)
+        assertEquals(listOf("반복된 걸음 감지"), events)
+        monitor.stop()
+    }
+
+    @Test fun observedUnlockCanBePolledWhenUserPresentIsMissing() {
+        addSensor(Sensor.TYPE_ACCELEROMETER)
+        val events = mutableListOf<String>()
+        shadowOf(context.getSystemService(KeyguardManager::class.java)).setKeyguardLocked(true)
+        val monitor = SensorMonitor(context) { reason, _ -> events.add(reason) }
+        monitor.start()
+        monitor.checkUserPresence()
+        assertTrue(events.isEmpty())
+        shadowOf(context.getSystemService(KeyguardManager::class.java)).setKeyguardLocked(false)
+        monitor.checkUserPresence()
+        monitor.checkUserPresence()
+        assertEquals(listOf("휴대전화 잠금 해제 감지"), events)
+        monitor.stop()
+    }
+
+    @Test fun screenWakeAndStartupWithoutObservedLockNeverResetActivity() {
+        addSensor(Sensor.TYPE_ACCELEROMETER)
+        val events = mutableListOf<String>()
+        val monitor = SensorMonitor(context) { reason, _ -> events.add(reason) }
+        monitor.start()
+        monitor.checkUserPresence()
+        context.sendBroadcast(Intent(Intent.ACTION_SCREEN_ON))
+        shadowOf(Looper.getMainLooper()).idle()
+        assertTrue(events.isEmpty())
+        monitor.stop()
+        context.sendBroadcast(Intent(Intent.ACTION_USER_PRESENT))
+        shadowOf(Looper.getMainLooper()).idle()
+        assertTrue(events.isEmpty())
+    }
+
+    @Test fun counterSupportDoesNotMakeLockedHandsetShakingAnActivity() {
+        addSensor(Sensor.TYPE_STEP_COUNTER)
+        val motion = addSensor(Sensor.TYPE_ACCELEROMETER)
+        val events = mutableListOf<String>()
+        val monitor = SensorMonitor(context) { reason, _ -> events.add(reason) }
+        assertEquals(SensorStartResult.STEP_COUNTER, monitor.start())
+        shadowOf(context.getSystemService(KeyguardManager::class.java)).setKeyguardLocked(true)
+        shadowOf(context.getSystemService(PowerManager::class.java)).setIsInteractive(false)
+        sendRepeatedMotion(motion)
+        assertTrue(events.isEmpty())
+        monitor.stop()
+    }
+
+    @Test fun unlockAfterAnHoursLongObservationGapIsNotClaimedAsCurrentActivity() {
+        addSensor(Sensor.TYPE_ACCELEROMETER)
+        val events = mutableListOf<String>()
+        shadowOf(context.getSystemService(KeyguardManager::class.java)).setKeyguardLocked(true)
+        val monitor = SensorMonitor(context) { reason, _ -> events.add(reason) }
+        monitor.start()
+        ShadowSystemClock.advanceBy(Duration.ofHours(8))
+        shadowOf(context.getSystemService(KeyguardManager::class.java)).setKeyguardLocked(false)
+        monitor.checkUserPresence()
+        assertTrue(events.isEmpty())
+        monitor.stop()
+    }
+
     private fun sendRepeatedMotion(sensor: Sensor) {
         val baseNanos = SystemClock.elapsedRealtimeNanos() - 10_000_000_000L
         repeat(5) { index ->
