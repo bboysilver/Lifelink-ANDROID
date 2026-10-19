@@ -1,7 +1,7 @@
 [versions]
 # Keep the newest 9.1 patch: installed Studio and the tested KGP/Gradle range support this line.
 #noinspection AndroidGradlePluginVersion
-agp = "9.1.1"
+agp = "9.4.1"
 coreKtx = "1.19.1"
 junit = "4.13.2"
 androidxJunit = "1.3.0"
