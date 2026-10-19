@@ -36,7 +36,10 @@ data class MonitoringSnapshot(
     val deviceAlias: String,
     val inactivityEventMs: Long = deadlineMs,
     // Handled includes exhausted failures, not just successful SMS sends.
-    val inactivityAlertHandled: Boolean = false
+    val inactivityAlertHandled: Boolean = false,
+    val lastAutomaticActivityMs: Long = 0L,
+    val lastAutomaticActivityReason: String = "자동 감지 기록 없음",
+    val lastAutomaticActivityApplied: Boolean = false
 ) {
     val isRunning: Boolean
         get() = runtimeState == MonitoringRuntimeState.RUNNING
@@ -300,6 +303,35 @@ class MonitoringStore(context: Context) {
         if (desiredEnabled && deadlineMs <= 0L) resetDeadline(nowMs, "초기 설정")
     }
 
+    fun recordAutomaticActivity(
+        activityAtMs: Long,
+        reason: String,
+        nowMs: Long = System.currentTimeMillis(),
+        elapsedRealtimeMs: Long = SystemClock.elapsedRealtime()
+    ): Boolean = synchronized(ACTIVITY_LOCK) {
+        rebaseAfterWallClockChange(nowMs, elapsedRealtimeMs)
+        if (!desiredEnabled || activityAtMs <= 0L || activityAtMs > nowMs) return@synchronized false
+        val applied = recordActivity(activityAtMs, reason, nowMs, elapsedRealtimeMs)
+        val previousAutomaticMs = preferences.getLong(KEY_LAST_AUTOMATIC_ACTIVITY_MS, 0L)
+        if (previousAutomaticMs > nowMs || activityAtMs > previousAutomaticMs) {
+            // Keep the last automatic signal separate from opening/touching the diagnostic screen.
+            preferences.edit {
+                putLong(KEY_LAST_AUTOMATIC_ACTIVITY_MS, activityAtMs)
+                putString(KEY_LAST_AUTOMATIC_ACTIVITY_REASON, reason)
+                putBoolean(KEY_LAST_AUTOMATIC_ACTIVITY_APPLIED, applied)
+            }
+        }
+        applied
+    }
+
+    fun clearAutomaticActivity() = synchronized(ACTIVITY_LOCK) {
+        preferences.edit {
+            remove(KEY_LAST_AUTOMATIC_ACTIVITY_MS)
+            remove(KEY_LAST_AUTOMATIC_ACTIVITY_REASON)
+            remove(KEY_LAST_AUTOMATIC_ACTIVITY_APPLIED)
+        }
+    }
+
     private fun nextInactivityEventMs(newDeadlineMs: Long): Long =
         maxOf(newDeadlineMs, inactivityEventMs + 1L)
 
@@ -387,6 +419,8 @@ class MonitoringStore(context: Context) {
         if (stateUpdatedMs > 0L) editor.putLong(KEY_STATE_UPDATED_MS, stateUpdatedMs + clockDeltaMs)
         val lastActivityMs = preferences.getLong(KEY_LAST_ACTIVITY_MS, 0L)
         if (lastActivityMs > 0L) editor.putLong(KEY_LAST_ACTIVITY_MS, lastActivityMs + clockDeltaMs)
+        val automaticMs = preferences.getLong(KEY_LAST_AUTOMATIC_ACTIVITY_MS, 0L)
+        if (automaticMs > 0L) editor.putLong(KEY_LAST_AUTOMATIC_ACTIVITY_MS, automaticMs + clockDeltaMs)
         if (wasPreAlerted(oldDeadlineMs)) {
             editor.putLong(KEY_PRE_ALERT_DEADLINE_MS, oldDeadlineMs + clockDeltaMs)
         }
@@ -712,7 +746,11 @@ class MonitoringStore(context: Context) {
             lastHeartbeatMs = heartbeatMs,
             deviceAlias = deviceAlias,
             inactivityEventMs = inactivityEventMs,
-            inactivityAlertHandled = wasEmergencyDispatched(inactivityEventMs)
+            inactivityAlertHandled = wasEmergencyDispatched(inactivityEventMs),
+            lastAutomaticActivityMs = preferences.getLong(KEY_LAST_AUTOMATIC_ACTIVITY_MS, 0L),
+            lastAutomaticActivityReason = preferences.getString(KEY_LAST_AUTOMATIC_ACTIVITY_REASON, null)
+                ?: "자동 감지 기록 없음",
+            lastAutomaticActivityApplied = preferences.getBoolean(KEY_LAST_AUTOMATIC_ACTIVITY_APPLIED, false)
         )
     }
 
@@ -735,6 +773,9 @@ class MonitoringStore(context: Context) {
         private const val KEY_INACTIVITY_EVENT_MS = "inactivity_event_ms"
         private const val KEY_LAST_ACTIVITY_MS = "last_activity_ms"
         private const val KEY_LAST_ACTIVITY_REASON = "last_activity_reason"
+        private const val KEY_LAST_AUTOMATIC_ACTIVITY_MS = "last_automatic_activity_ms"
+        private const val KEY_LAST_AUTOMATIC_ACTIVITY_REASON = "last_automatic_activity_reason"
+        private const val KEY_LAST_AUTOMATIC_ACTIVITY_APPLIED = "last_automatic_activity_applied"
         private const val KEY_PRE_ALERT_DEADLINE_MS = "pre_alert_deadline_ms"
         private const val KEY_EMERGENCY_DEADLINE_MS = "emergency_deadline_ms"
         private const val KEY_RUNTIME_STATE = "runtime_state"

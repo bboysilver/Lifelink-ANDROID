@@ -92,4 +92,24 @@ class SafetyToolsUiTest {
         composeRule.onNodeWithText("확인").assertIsDisplayed().performClick()
         composeRule.runOnIdle { assertTrue(closed) }
     }
+
+    @Test fun diagnosticShowsAutomaticEvidenceSeparatelyFromOpeningTheApp() {
+        val now = 1_800_000_000_000L
+        val snapshot = MonitoringSnapshot(
+            true, MonitoringRuntimeState.RUNNING, "", now + 3_600_000, 3_600, 0,
+            now, "라이프링크 화면 직접 조작", now, "사용자",
+            lastAutomaticActivityMs = now - 60_000,
+            lastAutomaticActivityReason = "걸음 수 증가 감지",
+            lastAutomaticActivityApplied = true
+        )
+        val report = SafetyDiagnosticReport(snapshot,
+            DiagnosticEnvironment(true, true, true, true, true, BatteryPolicy.OPTIMIZED), null, now)
+        composeRule.setContent { MaterialTheme {
+            SafetyDiagnosticsDialog(report, SmsSetupState.Blocked(SmsSetupIssue.NO_ACTIVE_SIM), null, {}, {}, {})
+        } }
+        composeRule.onNodeWithText("마지막 자동 감지 · 앱 조작과 별도").performScrollTo().assertIsDisplayed()
+        composeRule.onNodeWithText("걸음 수 증가 감지").performScrollTo().assertIsDisplayed()
+        composeRule.onNodeWithText(ACTIVITY_DETECTION_GUIDANCE).performScrollTo().assertIsDisplayed()
+        composeRule.onNodeWithText("확인").assertIsEnabled()
+    }
 }

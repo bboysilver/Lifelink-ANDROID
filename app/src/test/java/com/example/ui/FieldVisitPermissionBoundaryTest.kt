@@ -3,16 +3,28 @@ package com.example.ui
 import android.content.Context
 import android.content.pm.PackageManager
 import android.provider.Settings
+import android.hardware.Sensor
+import android.hardware.SensorManager
 import androidx.test.core.app.ApplicationProvider
 import org.junit.Assert.*
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
+import org.robolectric.Shadows.shadowOf
+import org.robolectric.shadows.ShadowSensor
 
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [36])
 class FieldVisitPermissionBoundaryTest {
+    @Test fun counterOnlyDeviceHasAnActivitySensorAndAnAccurateSupportLabel() {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        shadowOf(context.getSystemService(SensorManager::class.java))
+            .addSensor(ShadowSensor.newInstance(Sensor.TYPE_STEP_COUNTER))
+        val environment = SafetyDiagnosticsReader.read(context)
+        assertTrue(environment.hasActivitySensor)
+        assertEquals("걸음 수", environment.activitySensorSummary)
+    }
     @Test fun fieldPilotHasNoNewAndroidPermissionsOrNetworkPermission() {
         val context = ApplicationProvider.getApplicationContext<Context>()
         val info = context.packageManager.getPackageInfo(context.packageName, PackageManager.GET_PERMISSIONS)

@@ -138,9 +138,24 @@ internal fun SafetyDiagnosticsDialog(
                 DiagnosticLine("마지막 서비스 응답 (기기 내)", diagnosticTime(report.snapshot.lastHeartbeatMs))
                 DiagnosticLine("마지막 감지 활동", diagnosticTime(report.snapshot.lastActivityMs))
                 Text(report.snapshot.lastActivityReason)
+                DiagnosticLine(
+                    "마지막 자동 감지 · 앱 조작과 별도",
+                    when {
+                        report.snapshot.lastAutomaticActivityMs > report.checkedAtMs -> "기기 시각 확인 필요"
+                        else -> diagnosticTime(report.snapshot.lastAutomaticActivityMs)
+                    }
+                )
+                Text(report.snapshot.lastAutomaticActivityReason)
+                if (report.snapshot.lastAutomaticActivityMs > 0L && !report.snapshot.lastAutomaticActivityApplied) {
+                    Text("더 최근 활동이 있어 이 자동 신호로 타이머를 바꾸지 않았습니다.")
+                }
+                Text("앱을 열면 마지막 활동은 바뀔 수 있지만 위 자동 감지 기록은 덮어쓰지 않습니다.")
+                Text("어떤 활동을 감지하나요?", fontWeight = FontWeight.Bold)
+                Text(ACTIVITY_DETECTION_GUIDANCE)
                 DiagnosticLine("마지막 문자 발송 확인 · 시험 문자 포함", diagnosticTime(lastSmsSentAtMs))
                 Text("문자 발송·전달 확인은 보호자가 읽었거나 안부를 확인했다는 뜻이 아닙니다.")
                 DiagnosticLine("활동 센서 지원", if (report.environment.hasActivitySensor) "센서 있음 · 실제 감지 이력은 위에서 확인" else "지원 센서 없음")
+                Text(report.environment.activitySensorSummary)
                 DiagnosticLine("활동 인식 권한", permissionLabel(report.environment.activityGranted))
                 DiagnosticLine("SMS 발송 권한", permissionLabel(report.environment.smsGranted))
                 DiagnosticLine("SIM 확인 권한", permissionLabel(report.environment.phoneGranted))
@@ -179,6 +194,12 @@ internal fun SafetyDiagnosticsDialog(
         dismissButton = { TextButton(onClick = onRefresh) { Text("다시 점검") } }
     )
 }
+
+internal const val ACTIVITY_DETECTION_GUIDANCE =
+    "모니터링이 실행 중일 때 잠금 해제 신호, 반복 걸음, 일정 시간 반복된 휴대전화 움직임을 확인합니다. " +
+        "걸음은 한두 걸음만으로 갱신하지 않으며 걸음 수 센서는 첫 값 이후 증가를 확인합니다. " +
+        "화면 점등만으로는 갱신하지 않습니다. 다른 앱의 모든 터치·통화·사용 이력을 읽지 않습니다. " +
+        "다른 사람이 기기를 조작한 경우도 감지될 수 있으며 사람의 안전을 증명하지 않습니다."
 
 @Composable
 private fun DiagnosticLine(title: String, value: String) {
