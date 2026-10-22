@@ -3,12 +3,14 @@ package com.example.data
 import android.annotation.SuppressLint
 import android.content.Context
 import android.os.SystemClock
+import android.provider.Settings
 import androidx.core.content.edit
 import com.example.BuildConfig
 import com.example.monitoring.InactivityDeadlineScheduler
 import com.example.monitoring.InactivityDeadlineTask
 import com.example.monitoring.DailyCheckInScheduler
 import com.example.monitoring.MonitoringService
+import com.example.monitoring.MonitoringStatusNotifier
 import kotlin.math.abs
 import kotlin.math.max
 
@@ -58,6 +60,9 @@ object DeadlineCalculator {
 class MonitoringStore(context: Context) {
     private val appContext = context.applicationContext
     private val preferences = context.getSharedPreferences(FILE_NAME, Context.MODE_PRIVATE)
+
+    private fun bootCount(): Int =
+        Settings.Global.getInt(appContext.contentResolver, Settings.Global.BOOT_COUNT, -1)
 
     var monitorHours: Int
         get() = preferences.getInt(KEY_MONITOR_HOURS, 12).coerceIn(6, 72)
@@ -231,6 +236,7 @@ class MonitoringStore(context: Context) {
             putLong(KEY_LAST_HEARTBEAT_ELAPSED_MS, elapsedRealtimeMs)
             putLong(KEY_CLOCK_WALL_MS, nowMs)
             putLong(KEY_CLOCK_ELAPSED_MS, elapsedRealtimeMs)
+            putInt(KEY_CLOCK_BOOT_COUNT, bootCount())
             remove(KEY_WATCHDOG_ALERT_TOKEN)
             putString(KEY_SERVICE_ERROR, "")
             putLong(KEY_LAST_ACTIVITY_MS, nowMs)
@@ -270,6 +276,7 @@ class MonitoringStore(context: Context) {
             putLong(KEY_INACTIVITY_EVENT_MS, newEventMs)
             putLong(KEY_CLOCK_WALL_MS, clockNowMs)
             putLong(KEY_CLOCK_ELAPSED_MS, elapsedRealtimeMs)
+            putInt(KEY_CLOCK_BOOT_COUNT, bootCount())
         }
         InactivityDeadlineScheduler(appContext).ensureScheduled(clockNowMs)
         newDeadline
@@ -364,6 +371,7 @@ class MonitoringStore(context: Context) {
             putLong(KEY_LAST_HEARTBEAT_ELAPSED_MS, elapsedRealtimeMs)
             putLong(KEY_CLOCK_WALL_MS, nowMs)
             putLong(KEY_CLOCK_ELAPSED_MS, elapsedRealtimeMs)
+            putInt(KEY_CLOCK_BOOT_COUNT, bootCount())
             remove(KEY_WATCHDOG_ALERT_TOKEN)
             putString(KEY_SERVICE_ERROR, "")
         }
@@ -382,7 +390,9 @@ class MonitoringStore(context: Context) {
             putLong(KEY_LAST_HEARTBEAT_ELAPSED_MS, elapsedRealtimeMs)
             putLong(KEY_CLOCK_WALL_MS, nowMs)
             putLong(KEY_CLOCK_ELAPSED_MS, elapsedRealtimeMs)
+            putInt(KEY_CLOCK_BOOT_COUNT, bootCount())
         }
+        MonitoringStatusNotifier.cancel(appContext)
         clockCorrected
     }
 
@@ -399,7 +409,21 @@ class MonitoringStore(context: Context) {
         val previousElapsedMs = preferences.getLong(
             KEY_CLOCK_ELAPSED_MS, preferences.getLong(KEY_LAST_HEARTBEAT_ELAPSED_MS, -1L)
         )
-        if (previousWallMs <= 0L || previousElapsedMs < 0L || elapsedRealtimeMs < previousElapsedMs) {
+        if (previousWallMs <= 0L || previousElapsedMs < 0L) {
+            return@synchronized false
+        }
+
+        val currentBoot = bootCount()
+        val previousBoot = preferences.getInt(KEY_CLOCK_BOOT_COUNT, -1)
+        val incomparableClock = !preferences.contains(KEY_CLOCK_BOOT_COUNT) || currentBoot != previousBoot ||
+            elapsedRealtimeMs < previousElapsedMs
+        if (incomparableClock) {
+            // A missing or changed boot anchor cannot prove a wall-clock change.
+            preferences.edit(commit = true) {
+                putLong(KEY_CLOCK_WALL_MS, nowMs)
+                putLong(KEY_CLOCK_ELAPSED_MS, elapsedRealtimeMs)
+                putInt(KEY_CLOCK_BOOT_COUNT, currentBoot)
+            }
             return@synchronized false
         }
 
@@ -413,6 +437,7 @@ class MonitoringStore(context: Context) {
             .putLong(KEY_DEADLINE_MS, oldDeadlineMs + clockDeltaMs)
             .putLong(KEY_CLOCK_WALL_MS, nowMs)
             .putLong(KEY_CLOCK_ELAPSED_MS, elapsedRealtimeMs)
+            .putInt(KEY_CLOCK_BOOT_COUNT, currentBoot)
         val heartbeatMs = preferences.getLong(KEY_LAST_HEARTBEAT_MS, 0L)
         if (heartbeatMs > 0L) editor.putLong(KEY_LAST_HEARTBEAT_MS, heartbeatMs + clockDeltaMs)
         val stateUpdatedMs = preferences.getLong(KEY_STATE_UPDATED_MS, 0L)
@@ -448,6 +473,40 @@ class MonitoringStore(context: Context) {
         preferences.edit().putLong(KEY_WATCHDOG_ALERT_TOKEN, token).commit()
     }
 
+    @SuppressLint("UseKtx")
+    fun claimWatchdogInterruption(
+        observed: MonitoringSnapshot,
+        nowMs: Long = System.currentTimeMillis(),
+        postNotification: (String) -> Unit = {}
+    ): String? = synchronized(ACTIVITY_LOCK) activity@ {
+        val current = snapshot(nowMs)
+        if (observed.runtimeState != MonitoringRuntimeState.ERROR ||
+            !current.desiredEnabled || current.runtimeState != MonitoringRuntimeState.ERROR ||
+            current.lastHeartbeatMs != observed.lastHeartbeatMs ||
+            current.deadlineMs != observed.deadlineMs ||
+            current.inactivityEventMs != observed.inactivityEventMs ||
+            current.serviceError != observed.serviceError
+        ) return@activity null
+        val token = current.lastHeartbeatMs.takeIf { it > 0L } ?: current.deadlineMs
+        val message = current.serviceError.ifBlank { "모니터링 서비스의 응답이 없습니다." }
+        synchronized(WATCHDOG_LOCK) watchdog@ {
+            if (preferences.getLong(KEY_WATCHDOG_ALERT_TOKEN, Long.MIN_VALUE) == token) {
+                return@watchdog null
+            }
+            // Recovery and a user stop share ACTIVITY_LOCK; an old observation cannot overwrite them.
+            if (preferences.edit()
+                    .putLong(KEY_WATCHDOG_ALERT_TOKEN, token)
+                    .putString(KEY_RUNTIME_STATE, MonitoringRuntimeState.ERROR.name)
+                    .putLong(KEY_STATE_UPDATED_MS, nowMs)
+                    .putString(KEY_SERVICE_ERROR, message)
+                    .commit()
+            ) {
+                postNotification(message)
+                message
+            } else null
+        }
+    }
+
     fun dailyCheckInStatus(
         nowMs: Long = System.currentTimeMillis(),
         elapsedRealtimeMs: Long = SystemClock.elapsedRealtime()
@@ -479,8 +538,12 @@ class MonitoringStore(context: Context) {
         val previousWallMs = preferences.getLong(KEY_DAILY_CLOCK_WALL_MS, 0L)
         val previousElapsedMs = preferences.getLong(KEY_DAILY_CLOCK_ELAPSED_MS, -1L)
         if (previousWallMs <= 0L || previousElapsedMs < 0L) return false
-        val newDeadline = if (elapsedRealtimeMs < previousElapsedMs) {
-            // After a reboot, the elapsed clock cannot prove how long the phone was off.
+        val currentBoot = bootCount()
+        val previousBoot = preferences.getInt(KEY_DAILY_CLOCK_BOOT_COUNT, -1)
+        val incomparableClock = !preferences.contains(KEY_DAILY_CLOCK_BOOT_COUNT) || currentBoot != previousBoot ||
+            elapsedRealtimeMs < previousElapsedMs
+        val newDeadline = if (incomparableClock) {
+            // Reboot or migration cannot prove how long the response window has been pending.
             nowMs + DailyCheckInCalculator.RESPONSE_WINDOW_MS
         } else {
             val delta = nowMs - (previousWallMs + elapsedRealtimeMs - previousElapsedMs)
@@ -493,6 +556,7 @@ class MonitoringStore(context: Context) {
             putLong(KEY_DAILY_ACTIVITY_THRESHOLD_MS, preferences.getLong(KEY_DAILY_ACTIVITY_THRESHOLD_MS, dailyNextDueAtMs) + deltaMs)
             putLong(KEY_DAILY_CLOCK_WALL_MS, nowMs)
             putLong(KEY_DAILY_CLOCK_ELAPSED_MS, elapsedRealtimeMs)
+            putInt(KEY_DAILY_CLOCK_BOOT_COUNT, currentBoot)
         }
         return true
     }
@@ -585,6 +649,7 @@ class MonitoringStore(context: Context) {
             .putLong(KEY_DAILY_ACTIVITY_THRESHOLD_MS, dueAtMs)
             .putLong(KEY_DAILY_CLOCK_WALL_MS, nowMs)
             .putLong(KEY_DAILY_CLOCK_ELAPSED_MS, elapsedRealtimeMs)
+            .putInt(KEY_DAILY_CLOCK_BOOT_COUNT, bootCount())
             .putLong(
                 KEY_DAILY_RESPONSE_DEADLINE_AT_MS,
                 nowMs + DailyCheckInCalculator.RESPONSE_WINDOW_MS
@@ -784,6 +849,7 @@ class MonitoringStore(context: Context) {
         private const val KEY_LAST_HEARTBEAT_ELAPSED_MS = "last_heartbeat_elapsed_ms"
         private const val KEY_CLOCK_WALL_MS = "clock_wall_ms"
         private const val KEY_CLOCK_ELAPSED_MS = "clock_elapsed_ms"
+        private const val KEY_CLOCK_BOOT_COUNT = "clock_boot_count"
         private const val KEY_WATCHDOG_ALERT_TOKEN = "watchdog_alert_token"
         private const val KEY_SERVICE_ERROR = "service_error"
         private const val KEY_DEVICE_ALIAS = "device_alias"
@@ -797,6 +863,7 @@ class MonitoringStore(context: Context) {
         private const val KEY_DAILY_RESPONSE_DEADLINE_AT_MS = "daily_response_deadline_at_ms"
         private const val KEY_DAILY_CLOCK_WALL_MS = "daily_clock_wall_ms"
         private const val KEY_DAILY_CLOCK_ELAPSED_MS = "daily_clock_elapsed_ms"
+        private const val KEY_DAILY_CLOCK_BOOT_COUNT = "daily_clock_boot_count"
         private const val KEY_DAILY_ACTIVITY_THRESHOLD_MS = "daily_activity_threshold_ms"
         private const val KEY_DAILY_CHECK_IN_ERROR = "daily_check_in_error"
         private const val KEY_DAILY_CONFIRMED_DAY_START_MS = "daily_confirmed_day_start_ms"

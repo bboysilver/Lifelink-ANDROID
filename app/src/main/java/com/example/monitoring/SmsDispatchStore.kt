@@ -68,7 +68,8 @@ class SmsDispatchStore(context: Context) {
         require(totalParts > 0) { "SMS must contain at least one part" }
         val current = statusLocked(eventId)
         val canStart = current.state == SmsDispatchState.NOT_QUEUED ||
-            (current.state == SmsDispatchState.FAILED_RETRYABLE && nowMs >= current.retryAtMs)
+            (current.state == SmsDispatchState.FAILED_RETRYABLE &&
+                pendingAgeLocked(eventId, current, nowMs, elapsedRealtimeMs) >= RETRY_DELAY_MS)
         if (!canStart) return@synchronized null
 
         val attempt = current.attempt + 1
@@ -112,7 +113,7 @@ class SmsDispatchStore(context: Context) {
             val current = statusLocked(eventId)
             if (
                 current.state != SmsDispatchState.QUEUED ||
-                nowMs - current.updatedAtMs < CALLBACK_TIMEOUT_MS
+                pendingAgeLocked(eventId, current, nowMs, elapsedRealtimeMs) < CALLBACK_TIMEOUT_MS
             ) {
                 return@synchronized false
             }
@@ -165,11 +166,13 @@ class SmsDispatchStore(context: Context) {
 
         val confirmedPartKey = partKey(stage, eventId, attempt, partIndex)
         if (preferences.getBoolean(confirmedPartKey, false)) return@synchronized SmsCallbackOutcome.IGNORED
-        preferences.edit(commit = true) { putBoolean(confirmedPartKey, true) }
         val allPartsConfirmed = (0 until totalParts).all {
-            preferences.getBoolean(partKey(stage, eventId, attempt, it), false)
+            it == partIndex || preferences.getBoolean(partKey(stage, eventId, attempt, it), false)
         }
-        if (!allPartsConfirmed) return@synchronized SmsCallbackOutcome.PENDING
+        if (!allPartsConfirmed) {
+            preferences.edit(commit = true) { putBoolean(confirmedPartKey, true) }
+            return@synchronized SmsCallbackOutcome.PENDING
+        }
 
         val newState = if (stage == SmsCallbackStage.SENT) {
             SmsDispatchState.SENT
@@ -177,6 +180,8 @@ class SmsDispatchStore(context: Context) {
             SmsDispatchState.DELIVERED
         }
         preferences.edit(commit = true) {
+            // The last part and terminal state must survive process death together.
+            putBoolean(confirmedPartKey, true)
             putString(stateKey(eventId), newState.name)
             putLong(updatedAtKey(eventId), nowMs)
             putLong(elapsedKey(eventId), elapsedRealtimeMs)
@@ -283,6 +288,37 @@ class SmsDispatchStore(context: Context) {
         return if (retryable) SmsCallbackOutcome.FAILED_RETRYABLE else SmsCallbackOutcome.FAILED_FINAL
     }
 
+    private fun pendingAgeLocked(
+        eventId: String,
+        current: SmsDispatchStatus,
+        nowMs: Long,
+        elapsedRealtimeMs: Long
+    ): Long {
+        val anchor = preferences.getLong(elapsedKey(eventId), -1L)
+        val previousBoot = preferences.getInt(bootKey(eventId), -1)
+        val boot = bootCount()
+        val sameBoot = boot < 0 || previousBoot < 0 || boot == previousBoot
+        val age = if (sameBoot && anchor >= 0L && elapsedRealtimeMs >= anchor) {
+            elapsedRealtimeMs - anchor
+        } else 0L
+        val projectedUpdatedAtMs = nowMs - age
+        // Guard the decision itself, not just TIME_SET/Worker recovery. A missing
+        // or rebooted anchor receives one bounded wait, never an immediate retry.
+        if (anchor < 0L || !sameBoot || elapsedRealtimeMs < anchor ||
+            kotlin.math.abs(projectedUpdatedAtMs - current.updatedAtMs) > 1_000L
+        ) {
+            preferences.edit(commit = true) {
+                putLong(updatedAtKey(eventId), projectedUpdatedAtMs)
+                putLong(elapsedKey(eventId), elapsedRealtimeMs - age)
+                putInt(bootKey(eventId), boot)
+                putLong(retryAtKey(eventId), if (current.state == SmsDispatchState.FAILED_RETRYABLE) {
+                    projectedUpdatedAtMs + RETRY_DELAY_MS
+                } else 0L)
+            }
+        }
+        return age
+    }
+
     // The cleanup helper mutates one shared editor; the complete prune commits once.
     @SuppressLint("UseKtx")
     private fun pruneExpiredLocked(nowMs: Long, preserveEventIds: Set<String>): Int {
@@ -323,11 +359,32 @@ class SmsDispatchStore(context: Context) {
 
     private fun statusLocked(eventId: String): SmsDispatchStatus {
         val stateName = preferences.getString(stateKey(eventId), null)
-        val state = SmsDispatchState.entries.firstOrNull { it.name == stateName }
+        var state = SmsDispatchState.entries.firstOrNull { it.name == stateName }
             ?: SmsDispatchState.NOT_QUEUED
+        val attempt = preferences.getInt(attemptKey(eventId), 0)
+        val parts = preferences.getInt(totalPartsKey(eventId), 0)
+        if (state != SmsDispatchState.NOT_QUEUED && state != SmsDispatchState.DELIVERED && attempt > 0 && parts > 0) {
+            // Heal pre-2.3.9 interrupted two-commit callbacks before any timeout or retry.
+            val confirmed = listOf(SmsCallbackStage.DELIVERED, SmsCallbackStage.SENT).firstOrNull { stage ->
+                (0 until parts).all { preferences.getBoolean(partKey(stage, eventId, attempt, it), false) }
+            }
+            val recoveredState = when (confirmed) {
+                SmsCallbackStage.DELIVERED -> SmsDispatchState.DELIVERED
+                SmsCallbackStage.SENT -> SmsDispatchState.SENT
+                null -> state
+            }
+            if (recoveredState != state) {
+                state = recoveredState
+                preferences.edit(commit = true) {
+                    putString(stateKey(eventId), state.name)
+                    putLong(retryAtKey(eventId), 0L)
+                    putInt(resultCodeKey(eventId), Activity.RESULT_OK)
+                }
+            }
+        }
         return SmsDispatchStatus(
             state = state,
-            attempt = preferences.getInt(attemptKey(eventId), 0),
+            attempt = attempt,
             maxAttempts = preferences.getInt(maxAttemptsKey(eventId), SmsRetryPolicy.EMERGENCY.maxAttempts),
             updatedAtMs = preferences.getLong(updatedAtKey(eventId), 0L),
             retryAtMs = preferences.getLong(retryAtKey(eventId), 0L),

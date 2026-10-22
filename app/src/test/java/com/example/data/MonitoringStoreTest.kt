@@ -1,6 +1,7 @@
 package com.example.data
 
 import android.content.Context
+import android.provider.Settings
 import androidx.test.core.app.ApplicationProvider
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -17,6 +18,7 @@ class MonitoringStoreTest {
     @Before
     fun clearPreferences() {
         context = ApplicationProvider.getApplicationContext()
+        Settings.Global.putInt(context.contentResolver, Settings.Global.BOOT_COUNT, 10)
         context.getSharedPreferences("lifelink_monitoring", Context.MODE_PRIVATE)
             .edit()
             .clear()
@@ -132,6 +134,83 @@ class MonitoringStoreTest {
         val stale = store.snapshot(nowMs = 2_000L + MonitoringStore.HEARTBEAT_TIMEOUT_MS + 1L)
         assertEquals(MonitoringRuntimeState.ERROR, stale.runtimeState)
         assertFalse(stale.isRunning)
+    }
+
+    @Test
+    fun rebootWithHigherElapsedTimeDoesNotMoveTheInactivityDeadlineOrEvidence() {
+        val store = MonitoringStore(context)
+        val now = 1_700_000_000_000L
+        store.beginStart(nowMs = now, elapsedRealtimeMs = 60_000L)
+        store.recordAutomaticActivity(now + 1_000L, "steps", now + 1_000L, 61_000L)
+        val before = store.snapshot(now + 1_000L)
+        Settings.Global.putInt(context.contentResolver, Settings.Global.BOOT_COUNT, 11)
+        val recoveryAt = now + 13 * 3_600_000L
+
+        assertFalse(store.rebaseAfterWallClockChange(recoveryAt, 120_000L))
+        store.markServiceRunning(recoveryAt + 1_000L, 121_000L)
+
+        val after = store.snapshot(recoveryAt + 1_000L)
+        assertEquals(before.deadlineMs, after.deadlineMs)
+        assertEquals(before.inactivityEventMs, after.inactivityEventMs)
+        assertEquals(before.lastActivityMs, after.lastActivityMs)
+        assertEquals(before.lastAutomaticActivityMs, after.lastAutomaticActivityMs)
+        assertEquals(0L, after.remainingSeconds)
+        assertFalse(store.rebaseAfterWallClockChange(recoveryAt + 2_000L, 122_000L))
+        assertTrue(store.rebaseAfterWallClockChange(recoveryAt + 3_603_000L, 123_000L))
+        assertEquals(before.deadlineMs + 3_600_000L, store.deadlineMs)
+    }
+
+    @Test
+    fun rebootWithLowerElapsedTimeReanchorsBeforeLaterClockCorrection() {
+        val store = MonitoringStore(context)
+        val now = 1_700_000_000_000L
+        store.beginStart(nowMs = now, elapsedRealtimeMs = 3_600_000L)
+        val deadline = store.deadlineMs
+        val event = store.inactivityEventMs
+        Settings.Global.putInt(context.contentResolver, Settings.Global.BOOT_COUNT, 11)
+        val recoveryAt = now + 13 * 3_600_000L
+
+        assertFalse(store.rebaseAfterWallClockChange(recoveryAt, 1_000L))
+        assertFalse(store.rebaseAfterWallClockChange(recoveryAt + 1_000L, 2_000L))
+        assertEquals(deadline, store.deadlineMs)
+        assertEquals(event, store.inactivityEventMs)
+    }
+
+    @Test
+    fun upgradingWithoutABootAnchorPreservesTheDeadlineAndOnlyReanchorsOnce() {
+        val store = MonitoringStore(context)
+        val now = 1_700_000_000_000L
+        store.beginStart(nowMs = now, elapsedRealtimeMs = 60_000L)
+        val before = store.snapshot(now)
+        context.getSharedPreferences("lifelink_monitoring", Context.MODE_PRIVATE).edit()
+            .remove("clock_boot_count").commit()
+        val recoveryAt = now + 13 * 3_600_000L
+
+        assertFalse(store.rebaseAfterWallClockChange(recoveryAt, 120_000L))
+
+        val after = store.snapshot(recoveryAt)
+        assertEquals(before.deadlineMs, after.deadlineMs)
+        assertEquals(before.inactivityEventMs, after.inactivityEventMs)
+        assertEquals(before.lastActivityMs, after.lastActivityMs)
+        assertEquals(0L, after.remainingSeconds)
+        assertFalse(store.rebaseAfterWallClockChange(recoveryAt + 1_000L, 121_000L))
+        assertTrue(store.rebaseAfterWallClockChange(recoveryAt + 3_602_000L, 122_000L))
+        assertEquals(before.deadlineMs + 3_600_000L, store.deadlineMs)
+    }
+
+    @Test
+    fun temporarilyUnreadableBootCountReanchorsWithoutExtendingTheDeadline() {
+        val store = MonitoringStore(context)
+        val now = 1_700_000_000_000L
+        store.beginStart(nowMs = now, elapsedRealtimeMs = 60_000L)
+        val deadline = store.deadlineMs
+        Settings.Global.putInt(context.contentResolver, Settings.Global.BOOT_COUNT, -1)
+        val recoveryAt = now + 13 * 3_600_000L
+
+        assertFalse(store.rebaseAfterWallClockChange(recoveryAt, 120_000L))
+        assertEquals(deadline, store.deadlineMs)
+        assertFalse(store.rebaseAfterWallClockChange(recoveryAt + 1_000L, 121_000L))
+        assertEquals(deadline, store.deadlineMs)
     }
 
     @Test
@@ -487,6 +566,43 @@ class MonitoringStoreTest {
         assertEquals(DailyCheckInPhase.DUE, status.phase)
         assertEquals(now + DailyCheckInCalculator.RESPONSE_WINDOW_MS, status.overdueAtMs)
         assertEquals(due, status.dueAtMs)
+    }
+
+    @Test
+    fun dailyRebootWithHigherElapsedTimeGetsOneBoundedResponseWindow() {
+        val store = MonitoringStore(context)
+        val due = store.configureDailyCheckIn(9, 1_700_000_000_000L)
+        store.markDailyCheckInPrompted(due, due, 60_000L)
+        Settings.Global.putInt(context.contentResolver, Settings.Global.BOOT_COUNT, 11)
+        val recoveryAt = due + 13 * 3_600_000L
+
+        val recovered = store.dailyCheckInStatus(recoveryAt, 120_000L)
+
+        assertEquals(DailyCheckInPhase.DUE, recovered.phase)
+        assertEquals(due, recovered.dueAtMs)
+        assertEquals(recoveryAt + DailyCheckInCalculator.RESPONSE_WINDOW_MS, recovered.overdueAtMs)
+        val later = store.dailyCheckInStatus(recoveryAt + 60_000L, 180_000L)
+        assertEquals(recovered.overdueAtMs, later.overdueAtMs)
+        assertEquals(DailyCheckInPhase.OVERDUE, store.dailyCheckInStatus(
+            recovered.overdueAtMs, 120_000L + DailyCheckInCalculator.RESPONSE_WINDOW_MS
+        ).phase)
+    }
+
+    @Test
+    fun upgradingWithoutADailyBootAnchorGrantsOnlyOneBoundedResponseWindow() {
+        val store = MonitoringStore(context)
+        val due = store.configureDailyCheckIn(9, 1_700_000_000_000L)
+        store.markDailyCheckInPrompted(due, due, 60_000L)
+        context.getSharedPreferences("lifelink_monitoring", Context.MODE_PRIVATE).edit()
+            .remove("daily_clock_boot_count").commit()
+        val recoveryAt = due + 13 * 3_600_000L
+
+        val recovered = store.dailyCheckInStatus(recoveryAt, 120_000L)
+
+        assertEquals(due, recovered.dueAtMs)
+        assertEquals(recoveryAt + DailyCheckInCalculator.RESPONSE_WINDOW_MS, recovered.overdueAtMs)
+        assertEquals(recovered.overdueAtMs,
+            store.dailyCheckInStatus(recoveryAt + 60_000L, 180_000L).overdueAtMs)
     }
 
     private object SetupStepValue {

@@ -133,11 +133,15 @@ internal class SafetySmsRetryTask(
             val dispatch = SmsDispatchStore(appContext)
             dispatch.markQueuedTimeoutIfNeeded(eventId, nowMs)
             val status = dispatch.status(eventId)
-            if (status.state == SmsDispatchState.FAILED_FINAL) {
-                store.recordTestSmsResult(
+            when (status.state) {
+                SmsDispatchState.SENT, SmsDispatchState.DELIVERED -> store.recordTestSmsResult(
+                    eventId, TestSmsVerificationState.SUCCESS, "시험 문자 발송이 확인되었습니다."
+                )
+                SmsDispatchState.FAILED_FINAL -> store.recordTestSmsResult(
                     eventId, TestSmsVerificationState.FAILED,
                     "시험 문자 발송을 확인하지 못했습니다. 보호자 수신 여부와 SIM 상태를 확인한 뒤 다시 시도해 주세요."
                 )
+                else -> Unit
             }
             return if (status.state == SmsDispatchState.QUEUED) {
                 status.updatedAtMs + SmsDispatchStore.CALLBACK_TIMEOUT_MS

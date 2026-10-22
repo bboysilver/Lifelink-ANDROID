@@ -55,7 +55,7 @@ class SmsDispatchStoreTest {
 
     @Test
     fun sendFailureRetriesAfterFiveMinutes() {
-        val firstAttempt = store.beginAttempt(EVENT_ID, totalParts = 1, nowMs = 1_000L)!!
+        val firstAttempt = store.beginAttempt(EVENT_ID, totalParts = 1, nowMs = 1_000L, elapsedRealtimeMs = 1_000L)!!
 
         val failure = store.recordCallback(
             SmsCallbackStage.SENT,
@@ -64,17 +64,19 @@ class SmsDispatchStoreTest {
             partIndex = 0,
             totalParts = 1,
             resultCode = SmsManager.RESULT_ERROR_NO_SERVICE,
-            nowMs = 2_000L
+            nowMs = 2_000L,
+            elapsedRealtimeMs = 2_000L
         )
 
         assertEquals(SmsCallbackOutcome.FAILED_RETRYABLE, failure)
-        assertNull(store.beginAttempt(EVENT_ID, totalParts = 1, nowMs = 2_001L))
+        assertNull(store.beginAttempt(EVENT_ID, totalParts = 1, nowMs = 2_001L, elapsedRealtimeMs = 2_001L))
         assertEquals(
             2,
             store.beginAttempt(
                 EVENT_ID,
                 totalParts = 1,
-                nowMs = 2_000L + SmsDispatchStore.RETRY_DELAY_MS
+                nowMs = 2_000L + SmsDispatchStore.RETRY_DELAY_MS,
+                elapsedRealtimeMs = 2_000L + SmsDispatchStore.RETRY_DELAY_MS
             )
         )
     }
@@ -83,7 +85,7 @@ class SmsDispatchStoreTest {
     fun thirdSendFailureBecomesFinal() {
         var nowMs = 1_000L
         repeat(SmsDispatchStore.MAX_ATTEMPTS) { index ->
-            val attempt = store.beginAttempt(EVENT_ID, totalParts = 1, nowMs = nowMs)!!
+            val attempt = store.beginAttempt(EVENT_ID, totalParts = 1, nowMs = nowMs, elapsedRealtimeMs = nowMs)!!
             val outcome = store.recordCallback(
                 SmsCallbackStage.SENT,
                 EVENT_ID,
@@ -91,7 +93,8 @@ class SmsDispatchStoreTest {
                 partIndex = 0,
                 totalParts = 1,
                 resultCode = SmsManager.RESULT_ERROR_RADIO_OFF,
-                nowMs = nowMs + 1L
+                nowMs = nowMs + 1L,
+                elapsedRealtimeMs = nowMs + 1L
             )
             val expected = if (index == SmsDispatchStore.MAX_ATTEMPTS - 1) {
                 SmsCallbackOutcome.FAILED_FINAL
@@ -135,12 +138,13 @@ class SmsDispatchStoreTest {
 
     @Test
     fun lateCallbackFromPreviousAttemptIsIgnored() {
-        val firstAttempt = store.beginAttempt(EVENT_ID, totalParts = 1, nowMs = 1_000L)!!
-        store.markQueueFailure(EVENT_ID, firstAttempt, -1, nowMs = 2_000L)
+        val firstAttempt = store.beginAttempt(EVENT_ID, totalParts = 1, nowMs = 1_000L, elapsedRealtimeMs = 1_000L)!!
+        store.markQueueFailure(EVENT_ID, firstAttempt, -1, nowMs = 2_000L, elapsedRealtimeMs = 2_000L)
         val secondAttempt = store.beginAttempt(
             EVENT_ID,
             totalParts = 1,
-            nowMs = 2_000L + SmsDispatchStore.RETRY_DELAY_MS
+            nowMs = 2_000L + SmsDispatchStore.RETRY_DELAY_MS,
+            elapsedRealtimeMs = 2_000L + SmsDispatchStore.RETRY_DELAY_MS
         )!!
 
         val outcome = store.recordCallback(
@@ -182,8 +186,9 @@ class SmsDispatchStoreTest {
 
     @Test
     fun lateSuccessAfterTimeoutCancelsRetryBeforeAnotherAttempt() {
-        val attempt = store.beginAttempt(EVENT_ID, totalParts = 1, nowMs = 1_000L)!!
-        store.markQueuedTimeoutIfNeeded(EVENT_ID, 1_000L + SmsDispatchStore.CALLBACK_TIMEOUT_MS)
+        val attempt = store.beginAttempt(EVENT_ID, totalParts = 1, nowMs = 1_000L, elapsedRealtimeMs = 1_000L)!!
+        store.markQueuedTimeoutIfNeeded(EVENT_ID, 1_000L + SmsDispatchStore.CALLBACK_TIMEOUT_MS,
+            1_000L + SmsDispatchStore.CALLBACK_TIMEOUT_MS)
 
         val outcome = store.recordCallback(
             SmsCallbackStage.SENT, EVENT_ID, attempt, 0, 1, Activity.RESULT_OK,
@@ -197,9 +202,10 @@ class SmsDispatchStoreTest {
 
     @Test
     fun lateMultipartSuccessPreservesEarlierConfirmedParts() {
-        val attempt = store.beginAttempt(EVENT_ID, totalParts = 2, nowMs = 1_000L)!!
+        val attempt = store.beginAttempt(EVENT_ID, totalParts = 2, nowMs = 1_000L, elapsedRealtimeMs = 1_000L)!!
         store.recordCallback(SmsCallbackStage.SENT, EVENT_ID, attempt, 0, 2, Activity.RESULT_OK, 2_000L)
-        store.markQueuedTimeoutIfNeeded(EVENT_ID, 1_000L + SmsDispatchStore.CALLBACK_TIMEOUT_MS)
+        store.markQueuedTimeoutIfNeeded(EVENT_ID, 1_000L + SmsDispatchStore.CALLBACK_TIMEOUT_MS,
+            1_000L + SmsDispatchStore.CALLBACK_TIMEOUT_MS)
 
         val outcome = store.recordCallback(
             SmsCallbackStage.SENT, EVENT_ID, attempt, 1, 2, Activity.RESULT_OK,
@@ -212,8 +218,9 @@ class SmsDispatchStoreTest {
 
     @Test
     fun lateDeliveryAfterFinalTimeoutStillConfirmsTheSentMessage() {
-        val attempt = store.beginAttempt(EVENT_ID, 1, SmsRetryPolicy.ONE_SHOT, 1_000L)!!
-        store.markQueuedTimeoutIfNeeded(EVENT_ID, 1_000L + SmsDispatchStore.CALLBACK_TIMEOUT_MS)
+        val attempt = store.beginAttempt(EVENT_ID, 1, SmsRetryPolicy.ONE_SHOT, 1_000L, 1_000L)!!
+        store.markQueuedTimeoutIfNeeded(EVENT_ID, 1_000L + SmsDispatchStore.CALLBACK_TIMEOUT_MS,
+            1_000L + SmsDispatchStore.CALLBACK_TIMEOUT_MS)
 
         val outcome = store.recordCallback(
             SmsCallbackStage.DELIVERED, EVENT_ID, attempt, 0, 1, Activity.RESULT_OK,
@@ -254,11 +261,11 @@ class SmsDispatchStoreTest {
         val back = now - 3_600_000L
         store.rebasePendingAfterClockChange(back, elapsedRealtimeMs = 61_000L)
         assertEquals(back + 240_000L, store.status(EVENT_ID).retryAtMs)
-        assertNull(store.beginAttempt(EVENT_ID, 1, nowMs = back + 239_999L))
+        assertNull(store.beginAttempt(EVENT_ID, 1, nowMs = back + 239_999L, elapsedRealtimeMs = 300_999L))
         val forward = now + 7_200_000L
         store.rebasePendingAfterClockChange(forward, elapsedRealtimeMs = 121_000L)
         assertEquals(forward + 180_000L, store.status(EVENT_ID).retryAtMs)
-        assertEquals(2, store.beginAttempt(EVENT_ID, 1, nowMs = forward + 180_000L))
+        assertEquals(2, store.beginAttempt(EVENT_ID, 1, nowMs = forward + 180_000L, elapsedRealtimeMs = 301_000L))
     }
 
     @Test fun clockChangeDoesNotExtendOrPrematurelyExpireTheQueuedCallbackWait() {
@@ -268,7 +275,7 @@ class SmsDispatchStoreTest {
         val back = now - 3_600_000L
         store.rebasePendingAfterClockChange(back, 61_000L)
         assertEquals(back - 60_000L, store.status(EVENT_ID).updatedAtMs)
-        assertEquals(false, store.markQueuedTimeoutIfNeeded(EVENT_ID, back + 59_999L))
+        assertEquals(false, store.markQueuedTimeoutIfNeeded(EVENT_ID, back + 59_999L, 120_999L))
         assertEquals(SmsCallbackOutcome.SENT,
             store.recordCallback(SmsCallbackStage.SENT, EVENT_ID, attempt, 1, 2, Activity.RESULT_OK, back + 60_000L))
         assertEquals(SmsDispatchState.SENT, store.status(EVENT_ID).state)
@@ -281,8 +288,8 @@ class SmsDispatchStoreTest {
         store.beginAttempt(EVENT_ID, 1, nowMs = now, elapsedRealtimeMs = 500_000L)
         store.rebasePendingAfterClockChange(now - 7_200_000L, 1_000L, afterReboot = true)
         val rebased = now - 7_200_000L
-        assertEquals(false, store.markQueuedTimeoutIfNeeded(EVENT_ID, rebased + 119_999L))
-        assertEquals(true, store.markQueuedTimeoutIfNeeded(EVENT_ID, rebased + 120_000L))
+        assertEquals(false, store.markQueuedTimeoutIfNeeded(EVENT_ID, rebased + 119_999L, 120_999L))
+        assertEquals(true, store.markQueuedTimeoutIfNeeded(EVENT_ID, rebased + 120_000L, 121_000L))
         assertEquals(1, store.status(EVENT_ID).attempt)
         val context = ApplicationProvider.getApplicationContext<Context>()
         context.getSharedPreferences(SmsDispatchStore.FILE_NAME, Context.MODE_PRIVATE).edit()
