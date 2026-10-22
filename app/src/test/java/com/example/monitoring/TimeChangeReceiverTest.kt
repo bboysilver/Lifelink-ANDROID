@@ -29,6 +29,7 @@ class TimeChangeReceiverTest {
             .edit()
             .clear()
             .commit()
+        context.getSharedPreferences(SmsDispatchStore.FILE_NAME, Context.MODE_PRIVATE).edit().clear().commit()
         store = MonitoringStore(context)
         store.completeSetup()
     }
@@ -62,5 +63,18 @@ class TimeChangeReceiverTest {
         assertEquals(dueAtMs, store.dailyNextDueAtMs)
         assertEquals(DailyCheckInPhase.DUE, store.dailyCheckInStatus().phase)
 
+    }
+
+    @Test fun timeChangeAlsoRepairsSmsWhenDailyCheckInIsDisabled() {
+        val dispatch = SmsDispatchStore(context)
+        val now = System.currentTimeMillis()
+        val id = "sos:1000:1"
+        val attempt = dispatch.beginAttempt(id, 1, nowMs = now + 3_600_000L)!!
+        dispatch.markQueueFailure(id, attempt, -1, nowMs = now + 3_600_000L)
+
+        TimeChangeReceiver().onReceive(context, Intent(Intent.ACTION_TIME_CHANGED))
+
+        assertTrue(dispatch.status(id).retryAtMs <= System.currentTimeMillis() + SmsDispatchStore.RETRY_DELAY_MS)
+        assertEquals(1, dispatch.status(id).attempt)
     }
 }

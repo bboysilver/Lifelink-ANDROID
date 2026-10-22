@@ -7,7 +7,8 @@ object EmergencyMessageBuilder {
         lastActivityMs: Long = 0L,
         monitorHours: Int? = null,
         deadlineMs: Long = 0L,
-        evaluatedAtMs: Long = 0L
+        evaluatedAtMs: Long = 0L,
+        monitoringInterrupted: Boolean = false
     ): String {
         val batteryText = batteryPercent?.let { "$it%" } ?: "확인 불가"
         val delayMs = if (deadlineMs > 0L && evaluatedAtMs >= deadlineMs) evaluatedAtMs - deadlineMs else 0L
@@ -23,10 +24,12 @@ object EmergencyMessageBuilder {
             "발송 사유: ${monitorHours?.let { "${it}시간" } ?: "설정 시간"} ${if (delayed) "마감 후 지연 점검" else "무활동"}\n" +
             "마지막 감지 활동: ${formatTime(lastActivityMs)}\n" +
             delayNotice +
+            (if (monitoringInterrupted) "활동 감시 상태 확인 불가: 감시 중단 등으로 활동 기록이 누락됐을 수 있습니다.\n" else "") +
             "배터리: $batteryText\n" +
             "위치 정보는 수집하지 않습니다.\n" +
             "같은 무활동 경고를 설정 시간마다 반복하지 않습니다.\n" +
-            "추가 문자를 기다리지 말고 지금 직접 연락해 안전을 확인해 주세요."
+            "추가 문자를 기다리지 말고 지금 직접 연락해 안전을 확인해 주세요.\n" +
+            RESPONSE_GUIDANCE
     }
 
     fun buildSos(deviceAlias: String, requestedAtMs: Long): String {
@@ -35,7 +38,7 @@ object EmergencyMessageBuilder {
         return "[라이프링크 SOS]\n" +
             "$deviceAlias 님이 도움 요청 버튼을 눌렀습니다.\n" +
             "요청 시각: $requestedAt\n" +
-            "위치 정보는 수집하지 않습니다. 즉시 직접 연락해 주세요."
+            "위치 정보는 수집하지 않습니다. 즉시 직접 연락해 주세요.\n" + RESPONSE_GUIDANCE
     }
 
     fun buildDailyCheckInMissed(
@@ -48,7 +51,10 @@ object EmergencyMessageBuilder {
             "발송 사유: 안부 요청 후 2시간 동안 유효 활동·응답 없음\n" +
             "안부 확인 기준 시각: ${formatTime(dueAtMs)}\n" +
             "마지막 감지 활동: ${formatTime(lastActivityMs)}\n" +
-            "위치 정보는 수집하지 않습니다. 직접 연락해 안전을 확인해 주세요."
+            "위치 정보는 수집하지 않습니다. 직접 연락해 안전을 확인해 주세요.\n" + RESPONSE_GUIDANCE
+
+    private const val RESPONSE_GUIDANCE =
+        "연락이 안 되면 다른 보호자·가까운 분과 확인해 주세요. 응급상황이 의심되면 기다리지 말고 119에 알려주세요. 앱이 자동 신고하지는 않습니다."
 
     private fun formatTime(timestampMs: Long): String = if (timestampMs > 0L) {
         java.text.SimpleDateFormat("yyyy-MM-dd HH:mm z", java.util.Locale.KOREA)

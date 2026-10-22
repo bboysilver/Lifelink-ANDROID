@@ -55,6 +55,8 @@ class SafetySmsRetryWorker(
     params: WorkerParameters
 ) : CoroutineWorker(appContext, params) {
     override suspend fun doWork(): Result = try {
+        // TIME_SET can be missed while force-stopped; recovery must not trust old wall deadlines.
+        SmsDispatchStore(applicationContext).rebasePendingAfterClockChange()
         val task = SafetySmsRetryTask(applicationContext)
         val requestedEventId = inputData.getString(KEY_EVENT_ID)
         val eventIds = requestedEventId?.let(::listOf) ?: task.pendingEventIds()
@@ -143,9 +145,18 @@ internal class SafetySmsRetryTask(
         }
         val event = SafetySmsEvent.parse(eventId) ?: return null
         val snapshot = incidents.get(event.incidentId) ?: return null
-        if (snapshot.incident.completedAtMs != null) return null
-        val recipient = snapshot.recipients.firstOrNull { it.eventId == eventId } ?: return null
         val sender = EmergencySmsSender(appContext)
+        if (snapshot.incident.completedAtMs != null) {
+            // Late successful callbacks can correct a final timeout. Never reopen or resend it.
+            if (SafetySmsStatusNotifier.hasFailureNotice(appContext, event.incidentId)) {
+                val statuses = snapshot.recipients.map { recipient ->
+                    sender.status(recipient.eventId, nowMs).also { incidents.recordStatus(recipient.eventId, it) }
+                }
+                SafetySmsStatusNotifier.showCompletion(appContext, event.type, statuses, event.incidentId)
+            }
+            return null
+        }
+        val recipient = snapshot.recipients.firstOrNull { it.eventId == eventId } ?: return null
 
         val superseded = when (event.type) {
             SafetySmsEventType.EMERGENCY -> !store.desiredEnabled || store.inactivityEventMs != event.occurredAtMs

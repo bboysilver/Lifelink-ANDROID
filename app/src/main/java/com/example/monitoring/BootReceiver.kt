@@ -13,6 +13,11 @@ class BootReceiver : BroadcastReceiver() {
             intent.action != Intent.ACTION_MY_PACKAGE_REPLACED
         ) return
         val store = MonitoringStore(context)
+        SmsDispatchStore(context).rebasePendingAfterClockChange(
+            afterReboot = intent.action == Intent.ACTION_BOOT_COMPLETED
+        ).forEach { eventId ->
+            SafetySmsRetryWorker.enqueueAt(context, eventId, System.currentTimeMillis())
+        }
         MaintenanceWorker.ensureScheduled(context)
         SafetySmsRetryWorker.enqueueRecovery(context)
         if (store.isSetupCompleted && store.desiredEnabled) {

@@ -80,7 +80,10 @@ class SafetyIncidentRepository(private val db: AppDatabase) {
             if (attemptCount < current.attemptCount) return@withTransaction
             if (attemptCount == current.attemptCount) {
                 val confirmedCallback = dispatchState == "SENT" || dispatchState == "DELIVERED"
-                if (updatedAtMs < current.updatedAtMs && !confirmedCallback) return@withTransaction
+                val forwardFailure = current.dispatchState == "QUEUED" &&
+                    dispatchState in listOf("FAILED_RETRYABLE", "FAILED_FINAL")
+                // A wall-clock correction must not leave an actually failed attempt shown as queued.
+                if (updatedAtMs < current.updatedAtMs && !confirmedCallback && !forwardFailure) return@withTransaction
                 // Foreground and broadcast coroutines may persist snapshots out of
                 // order, including within the same millisecond.
                 if (current.dispatchState == "DELIVERED" && dispatchState != "DELIVERED") {

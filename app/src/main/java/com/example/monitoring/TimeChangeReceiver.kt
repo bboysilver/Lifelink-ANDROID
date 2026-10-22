@@ -11,6 +11,9 @@ class TimeChangeReceiver : BroadcastReceiver() {
         val store = MonitoringStore(context.applicationContext)
         if (intent.action == Intent.ACTION_TIME_CHANGED) {
             store.rebaseAfterWallClockChange()
+            SmsDispatchStore(context).rebasePendingAfterClockChange().forEach { eventId ->
+                SafetySmsRetryWorker.enqueueAt(context, eventId, System.currentTimeMillis())
+            }
         }
         if (!store.isSetupCompleted || !store.dailyCheckInEnabled) return
 
