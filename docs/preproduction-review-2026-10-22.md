@@ -37,6 +37,8 @@
 
 같은 날 Dashboard에서는 **12 testers / 4 days continuously**, `Apply for production` 비활성, Production Inactive를 직접 확인했습니다. 따라서 현재 연속 참여가 유지되면 약 10일이 더 필요하다는 사용자 예상과 일치합니다. 신청 가능 날짜의 보장이나 승인 완료를 뜻하지 않습니다. SMS 설명 저장 후 Update status는 Not yet sent for review였으므로 저장과 심사 제출도 구분합니다.
 
+이후 정정 설명과 2.3.8을 Closed testing 심사에 제출했습니다. 최종 파일·CI·Console 접수 상태는 [배포 기록](deployment-2.3.8.md)에 구분해 보관합니다. 프로덕션 접근 신청은 실행하지 않았습니다.
+
 현재 구현에서 새 AD_ID·인터넷·위치·SMS 읽기 권한은 없습니다. SMS 물리적 안전 예외는 심사 대상이지 자동 허용이 아닙니다. [공식 SMS 정책](https://support.google.com/googleplay/android-developer/answer/10208820?hl=en)
 
 Data safety는 서버가 없다는 이유로 무조건 ‘수집 없음’으로 바꾸지 않습니다. 외부로 보내는 실제 정보·동의·처리 목적에 맞춰 검토합니다. health FGS와 shortService SOS, 건강 앱 선언·비의료 고지·시연 자료도 현재 구현과 일치해야 합니다. [Data safety](https://support.google.com/googleplay/android-developer/answer/10787469?hl=en), [FGS](https://support.google.com/googleplay/android-developer/answer/13392821?hl=en), [건강 앱 선언](https://support.google.com/googleplay/android-developer/answer/14738291?hl=en)

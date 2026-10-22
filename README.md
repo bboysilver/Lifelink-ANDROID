@@ -89,7 +89,7 @@ R1 범위·검증 결과는 [현장 파일럿 안내](docs/field-pilot-release-n
 2.3.6의 기존 경고 77개 처리·호환성·자동 검사 결과는 [검증 기록](docs/verification-2.3.6.md)을 참고하세요.
 2.3.7의 활동 감지 보완과 314개 자동 검사 결과는 [검증 기록](docs/verification-2.3.7.md)을 참고하세요.
 2.3.8의 327개 검사·수정 내역과 공개 출시 판단·남은 시험·제품 차별화·보호자 대응은 [출시 전 검토](docs/preproduction-review-2026-10-22.md)를 참고하세요.
-제출한 서명 파일과 실제 Play 상태는 [2.3.7 배포 기록](docs/deployment-2.3.7.md)을 참고하세요. 이전 기록은 [2.3.6 배포 기록](docs/deployment-2.3.6.md)에 보관합니다.
+제출한 서명 파일과 실제 Play 상태는 [2.3.8 배포 기록](docs/deployment-2.3.8.md)을 참고하세요. 이전 기록은 [2.3.7](docs/deployment-2.3.7.md)과 [2.3.6](docs/deployment-2.3.6.md)에 보관합니다.
 
 ## 개인정보
 
