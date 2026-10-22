@@ -9,6 +9,9 @@ import android.app.Notification
 import androidx.core.app.NotificationCompat
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
+import android.telephony.SubscriptionManager
+import android.telephony.TelephonyManager
 import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
 import com.example.data.AppDatabase
@@ -26,6 +29,7 @@ import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.Shadows.shadowOf
 import org.robolectric.annotation.Config
+import org.robolectric.shadows.ShadowSubscriptionManager.SubscriptionInfoBuilder
 
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [32])
@@ -84,6 +88,31 @@ class InactivityDeadlineTest {
         task.run(old, old + 1_000L, old + 1_000L - now)
         assertFalse(store.wasPreAlerted(store.deadlineMs))
         assertNull(incidents.get("emergency:$old"))
+    }
+
+    @Test
+    fun activityBetweenSnapshotAndDispatchCannotAttachAnExpiredDeadlineToTheNewCycle() = runBlocking {
+        shadowOf(context).grantPermissions(Manifest.permission.SEND_SMS, Manifest.permission.READ_PHONE_STATE)
+        shadowOf(context.packageManager).setSystemFeature(PackageManager.FEATURE_TELEPHONY, true)
+        shadowOf(context.getSystemService(TelephonyManager::class.java)).setIsSmsCapable(true)
+        shadowOf(context.getSystemService(SubscriptionManager::class.java)).setActiveSubscriptionInfos(
+            SubscriptionInfoBuilder.newBuilder().setId(1).setSimSlotIndex(0).setDisplayName("SIM").buildSubscriptionInfo()
+        )
+        db.contactDao().insertContactIfAllowed(Contact(name = "guardian", phoneNumber = "01012345678"))
+        val oldEvent = store.inactivityEventMs
+        val checkAt = store.deadlineMs + 1_000L
+        val racingTask = InactivityDeadlineTask(context, store, LifeLinkRepository(db), incidents,
+            readSnapshot = { at ->
+                store.snapshot(at).also { store.recordActivity(at, "unlock", at, at - now) }
+            })
+
+        racingTask.run(nowMs = checkAt, elapsedRealtimeMs = checkAt - now)
+
+        assertNotEquals(oldEvent, store.inactivityEventMs)
+        assertNull(incidents.get("emergency:$oldEvent"))
+        assertNull(incidents.get("emergency:${store.inactivityEventMs}"))
+        assertFalse(store.wasEmergencyDispatched(store.inactivityEventMs))
+        assertTrue(store.snapshot(checkAt).remainingSeconds > 0L)
     }
 
     @Test

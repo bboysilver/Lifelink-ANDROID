@@ -3,6 +3,8 @@ package com.example.monitoring
 import android.annotation.SuppressLint
 import android.app.Activity
 import android.content.Context
+import android.os.SystemClock
+import android.provider.Settings
 import androidx.core.content.edit
 
 enum class SmsDispatchState {
@@ -47,7 +49,10 @@ enum class SmsCallbackOutcome {
 
 @SuppressLint("ApplySharedPref")
 class SmsDispatchStore(context: Context) {
+    private val appContext = context.applicationContext
     private val preferences = context.getSharedPreferences(FILE_NAME, Context.MODE_PRIVATE)
+
+    private fun bootCount(): Int = Settings.Global.getInt(appContext.contentResolver, Settings.Global.BOOT_COUNT, -1)
 
     fun status(eventId: String): SmsDispatchStatus = synchronized(LOCK) {
         statusLocked(eventId)
@@ -57,7 +62,8 @@ class SmsDispatchStore(context: Context) {
         eventId: String,
         totalParts: Int,
         policy: SmsRetryPolicy = SmsRetryPolicy.EMERGENCY,
-        nowMs: Long = System.currentTimeMillis()
+        nowMs: Long = System.currentTimeMillis(),
+        elapsedRealtimeMs: Long = SystemClock.elapsedRealtime()
     ): Int? = synchronized(LOCK) {
         require(totalParts > 0) { "SMS must contain at least one part" }
         val current = statusLocked(eventId)
@@ -75,6 +81,8 @@ class SmsDispatchStore(context: Context) {
             putInt(maxAttemptsKey(eventId), policy.maxAttempts)
             putInt(totalPartsKey(eventId), totalParts)
             putLong(updatedAtKey(eventId), nowMs)
+            putLong(elapsedKey(eventId), elapsedRealtimeMs)
+            putInt(bootKey(eventId), bootCount())
             putLong(retryAtKey(eventId), 0L)
             putInt(resultCodeKey(eventId), Activity.RESULT_OK)
         }
@@ -85,16 +93,21 @@ class SmsDispatchStore(context: Context) {
         eventId: String,
         attempt: Int,
         resultCode: Int,
-        nowMs: Long = System.currentTimeMillis()
+        nowMs: Long = System.currentTimeMillis(),
+        elapsedRealtimeMs: Long = SystemClock.elapsedRealtime()
     ): SmsCallbackOutcome = synchronized(LOCK) {
         val current = statusLocked(eventId)
         if (current.attempt != attempt || current.state != SmsDispatchState.QUEUED) {
             return@synchronized SmsCallbackOutcome.IGNORED
         }
-        markFailureLocked(eventId, attempt, resultCode, nowMs)
+        markFailureLocked(eventId, attempt, resultCode, nowMs, elapsedRealtimeMs)
     }
 
-    fun markQueuedTimeoutIfNeeded(eventId: String, nowMs: Long = System.currentTimeMillis()): Boolean =
+    fun markQueuedTimeoutIfNeeded(
+        eventId: String,
+        nowMs: Long = System.currentTimeMillis(),
+        elapsedRealtimeMs: Long = SystemClock.elapsedRealtime()
+    ): Boolean =
         synchronized(LOCK) {
             val current = statusLocked(eventId)
             if (
@@ -103,7 +116,7 @@ class SmsDispatchStore(context: Context) {
             ) {
                 return@synchronized false
             }
-            markFailureLocked(eventId, current.attempt, RESULT_CALLBACK_TIMEOUT, nowMs)
+            markFailureLocked(eventId, current.attempt, RESULT_CALLBACK_TIMEOUT, nowMs, elapsedRealtimeMs)
             true
         }
 
@@ -114,7 +127,8 @@ class SmsDispatchStore(context: Context) {
         partIndex: Int,
         totalParts: Int,
         resultCode: Int,
-        nowMs: Long = System.currentTimeMillis()
+        nowMs: Long = System.currentTimeMillis(),
+        elapsedRealtimeMs: Long = SystemClock.elapsedRealtime()
     ): SmsCallbackOutcome = synchronized(LOCK) {
         val current = statusLocked(eventId)
         if (
@@ -137,11 +151,13 @@ class SmsDispatchStore(context: Context) {
         }
 
         if (stage == SmsCallbackStage.SENT && resultCode != Activity.RESULT_OK) {
-            return@synchronized markFailureLocked(eventId, attempt, resultCode, nowMs)
+            return@synchronized markFailureLocked(eventId, attempt, resultCode, nowMs, elapsedRealtimeMs)
         }
         if (stage == SmsCallbackStage.DELIVERED && resultCode != Activity.RESULT_OK) {
             preferences.edit(commit = true) {
                 putLong(updatedAtKey(eventId), nowMs)
+                putLong(elapsedKey(eventId), elapsedRealtimeMs)
+                putInt(bootKey(eventId), bootCount())
                 putInt(resultCodeKey(eventId), resultCode)
             }
             return@synchronized SmsCallbackOutcome.DELIVERY_UNCONFIRMED
@@ -163,6 +179,8 @@ class SmsDispatchStore(context: Context) {
         preferences.edit(commit = true) {
             putString(stateKey(eventId), newState.name)
             putLong(updatedAtKey(eventId), nowMs)
+            putLong(elapsedKey(eventId), elapsedRealtimeMs)
+            putInt(bootKey(eventId), bootCount())
             putLong(retryAtKey(eventId), 0L)
             putInt(resultCodeKey(eventId), resultCode)
         }
@@ -173,7 +191,12 @@ class SmsDispatchStore(context: Context) {
         synchronized(LOCK) {
             val key = testThrottleKey(contactId)
             if (preferences.contains(key)) {
-                val remaining = TEST_SMS_COOLDOWN_MS - (nowMs - preferences.getLong(key, 0L))
+                val previous = preferences.getLong(key, 0L)
+                if (nowMs < previous) {
+                    preferences.edit(commit = true) { putLong(key, nowMs) }
+                    return@synchronized TEST_SMS_COOLDOWN_MS
+                }
+                val remaining = TEST_SMS_COOLDOWN_MS - (nowMs - previous)
                 if (remaining > 0L) return@synchronized remaining
             }
             preferences.edit(commit = true) { putLong(key, nowMs) }
@@ -185,6 +208,37 @@ class SmsDispatchStore(context: Context) {
         preserveEventIds: Set<String> = emptySet()
     ): Int = synchronized(LOCK) {
         pruneExpiredLocked(nowMs, preserveEventIds)
+    }
+
+    // Re-anchor only waiting intervals; IDs, attempts, multipart results and completed SMS stay intact.
+    // A reboot or legacy record cannot prove elapsed time, so grant one bounded wait window.
+    fun rebasePendingAfterClockChange(
+        nowMs: Long = System.currentTimeMillis(),
+        elapsedRealtimeMs: Long = SystemClock.elapsedRealtime(),
+        afterReboot: Boolean = false
+    ): List<String> = synchronized(LOCK) {
+        val pending = preferences.getStringSet(KEY_EVENT_IDS, emptySet()).orEmpty().filter {
+            statusLocked(it).state in setOf(SmsDispatchState.QUEUED, SmsDispatchState.FAILED_RETRYABLE)
+        }
+        if (pending.isEmpty()) return@synchronized emptyList()
+        val boot = bootCount()
+        preferences.edit(commit = true) {
+            pending.forEach { eventId ->
+                val current = statusLocked(eventId)
+                val window = if (current.state == SmsDispatchState.QUEUED) CALLBACK_TIMEOUT_MS else RETRY_DELAY_MS
+                val anchor = preferences.getLong(elapsedKey(eventId), -1L)
+                val previousBoot = preferences.getInt(bootKey(eventId), -1)
+                val sameBoot = !afterReboot && (boot < 0 || previousBoot < 0 || boot == previousBoot)
+                val age = if (sameBoot && anchor >= 0L && elapsedRealtimeMs >= anchor) {
+                    (elapsedRealtimeMs - anchor).coerceAtMost(window)
+                } else 0L
+                putLong(updatedAtKey(eventId), nowMs - age)
+                putLong(retryAtKey(eventId), if (current.state == SmsDispatchState.FAILED_RETRYABLE) nowMs + window - age else 0L)
+                putLong(elapsedKey(eventId), elapsedRealtimeMs - age)
+                putInt(bootKey(eventId), boot)
+            }
+        }
+        pending
     }
 
     // Share this editor with the per-part cleanup helper, then commit the batch once.
@@ -212,7 +266,8 @@ class SmsDispatchStore(context: Context) {
         eventId: String,
         attempt: Int,
         resultCode: Int,
-        nowMs: Long
+        nowMs: Long,
+        elapsedRealtimeMs: Long
     ): SmsCallbackOutcome {
         val current = statusLocked(eventId)
         val retryable = attempt < current.maxAttempts
@@ -220,6 +275,8 @@ class SmsDispatchStore(context: Context) {
         preferences.edit(commit = true) {
             putString(stateKey(eventId), state.name)
             putLong(updatedAtKey(eventId), nowMs)
+            putLong(elapsedKey(eventId), elapsedRealtimeMs)
+            putInt(bootKey(eventId), bootCount())
             putLong(retryAtKey(eventId), if (retryable) nowMs + RETRY_DELAY_MS else 0L)
             putInt(resultCodeKey(eventId), resultCode)
         }
@@ -258,6 +315,8 @@ class SmsDispatchStore(context: Context) {
             .remove(maxAttemptsKey(eventId))
             .remove(totalPartsKey(eventId))
             .remove(updatedAtKey(eventId))
+            .remove(elapsedKey(eventId))
+            .remove(bootKey(eventId))
             .remove(retryAtKey(eventId))
             .remove(resultCodeKey(eventId))
     }
@@ -281,6 +340,8 @@ class SmsDispatchStore(context: Context) {
     private fun maxAttemptsKey(eventId: String) = "max-attempts:$eventId"
     private fun totalPartsKey(eventId: String) = "parts:$eventId"
     private fun updatedAtKey(eventId: String) = "updated:$eventId"
+    private fun elapsedKey(eventId: String) = "elapsed:$eventId"
+    private fun bootKey(eventId: String) = "boot:$eventId"
     private fun retryAtKey(eventId: String) = "retry:$eventId"
     private fun resultCodeKey(eventId: String) = "result:$eventId"
     private fun testThrottleKey(contactId: Int) = "test-throttle:$contactId"

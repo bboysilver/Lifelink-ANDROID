@@ -75,6 +75,8 @@ internal fun SafetyToolsCard(
     onSimpleHomeChanged: (Boolean) -> Unit,
     onOpenDiagnostics: () -> Unit
 ) {
+    var showResponseGuide by remember { mutableStateOf(false) }
+    if (showResponseGuide) CaregiverResponseDialog { showResponseGuide = false }
     Card(modifier = Modifier.fillMaxWidth()) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -93,8 +95,32 @@ internal fun SafetyToolsCard(
                 onClick = onOpenDiagnostics,
                 modifier = Modifier.fillMaxWidth().heightIn(min = 56.dp).testTag("open_diagnostics")
             ) { Text("작동 상태 점검", fontSize = 18.sp, fontWeight = FontWeight.Bold) }
+            OutlinedButton(
+                onClick = { showResponseGuide = true },
+                modifier = Modifier.fillMaxWidth().heightIn(min = 56.dp).testTag("open_response_guide")
+            ) { Text("경고 문자를 받았다면", fontSize = 18.sp, fontWeight = FontWeight.Bold) }
         }
     }
+}
+
+@Composable
+internal fun CaregiverResponseDialog(onDismiss: () -> Unit) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("보호자 대응 안내", fontWeight = FontWeight.Bold) },
+        text = {
+            Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+                Text("문자만으로 응급상황이나 안전을 단정할 수 없습니다. 추가 문자를 기다리지 마세요.")
+                Text("1. 지금 사용자에게 직접 전화해 안부를 확인해 주세요.")
+                Text("2. 연락이 안 되면 미리 정한 다른 보호자·가까운 분과 연락하고 확인 담당자를 정해 주세요.")
+                Text("3. 응급상황이 의심되면 기다리지 말고 119에 상황과 알고 있는 위치를 알려주세요. 상담원의 안내를 따라주세요.")
+                Text("4. 실제 통화·대면으로 확인한 결과와 시각을 다른 보호자에게도 알려주세요.")
+                Text("설치할 때 주 보호자와 가까운 예비 연락자를 미리 정하고 문자 수신·대응에 동의받으세요.")
+                Text("앱은 자동 신고·출동을 요청하거나 문자 회신을 읽지 않습니다. 이 기기의 가족 확인 기록은 원격 보호자의 응답이 아니며 문자 재시도를 중지하지 않습니다.")
+            }
+        },
+        confirmButton = { TextButton(onClick = onDismiss, modifier = Modifier.heightIn(min = 56.dp)) { Text("확인") } }
+    )
 }
 
 @Composable

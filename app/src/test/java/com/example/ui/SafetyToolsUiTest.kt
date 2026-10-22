@@ -34,6 +34,29 @@ import org.robolectric.annotation.Config
 class SafetyToolsUiTest {
     @get:Rule val composeRule = createComposeRule()
 
+    @Test fun caregiverGuideIsOptionalAndCanCloseAtLargeText() {
+        var closed = false
+        composeRule.setContent {
+            CompositionLocalProvider(LocalDensity provides Density(1f, 2f)) {
+                MaterialTheme { CaregiverResponseDialog { closed = true } }
+            }
+        }
+        composeRule.onNodeWithText("보호자 대응 안내").assertIsDisplayed()
+        composeRule.onNodeWithText("확인").assertIsDisplayed().performClick()
+        composeRule.runOnIdle { assertTrue(closed) }
+    }
+
+    @Test fun caregiverGuideOpensOnlyWhenRequested() {
+        composeRule.setContent {
+            MaterialTheme {
+                Column(Modifier.verticalScroll(rememberScrollState())) { SafetyToolsCard(false, {}, {}) }
+            }
+        }
+        composeRule.onNodeWithText("보호자 대응 안내").assertDoesNotExist()
+        composeRule.onNodeWithTag("open_response_guide").performScrollTo().performClick()
+        composeRule.onNodeWithText("보호자 대응 안내").assertIsDisplayed()
+    }
+
     @Test fun simpleTimerHasReadableUnitsAtTwoHundredPercentText() {
         composeRule.setContent {
             CompositionLocalProvider(LocalDensity provides Density(1f, 2f)) {

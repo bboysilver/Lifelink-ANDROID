@@ -2,6 +2,7 @@ package com.example.monitoring
 
 import android.annotation.SuppressLint
 import android.app.PendingIntent
+import android.app.NotificationManager
 import android.content.Context
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
@@ -43,8 +44,9 @@ internal object SafetySmsStatusNotifier {
             }
         }
         SafetyNotificationCapability.createAlertChannel(appContext)
-        if (!SafetyNotificationCapability.canPost(appContext)) return
         val confirmed = failedCount == 0
+        if (confirmed) NotificationManagerCompat.from(appContext).cancel(incidentId, NOTIFICATION_ID)
+        if (!SafetyNotificationCapability.canPost(appContext)) return
         if (confirmed) SafetyNotificationCapability.createStatusChannel(appContext)
         val guidance = if (type == SafetySmsEventType.EMERGENCY) {
             " 같은 무활동 경고는 새로 반복하지 않습니다. 문자 발송은 보호자의 안부 확인을 뜻하지 않습니다."
@@ -74,4 +76,9 @@ internal object SafetySmsStatusNotifier {
             incidentId, if (confirmed) CONFIRMED_NOTIFICATION_ID else NOTIFICATION_ID, notification
         )
     }
+
+    fun hasFailureNotice(context: Context, incidentId: String): Boolean =
+        context.getSystemService(NotificationManager::class.java).activeNotifications.any {
+            it.tag == incidentId && it.id == NOTIFICATION_ID
+        }
 }

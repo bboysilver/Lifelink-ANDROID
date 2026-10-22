@@ -5,6 +5,7 @@ import android.app.Activity
 import android.app.Notification
 import android.app.NotificationManager
 import android.content.Context
+import android.os.SystemClock
 import androidx.test.core.app.ApplicationProvider
 import androidx.work.ListenableWorker
 import androidx.work.WorkManager
@@ -26,6 +27,8 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
+import org.robolectric.shadows.ShadowSystemClock
+import java.time.Duration
 import java.util.concurrent.TimeUnit
 
 @RunWith(RobolectricTestRunner::class)
@@ -169,6 +172,68 @@ class SafetySmsRetryWorkerTest {
         assertTrue(notification.extras.getString(Notification.EXTRA_TEXT)!!.contains("모두"))
         assertTrue(incidents.get("sos:1000")!!.incident.completedAtMs != null)
         assertEquals(SmsDispatchState.FAILED_FINAL, dispatch.status(eventId).state)
+    }
+
+    @Test
+    @Config(sdk = [28])
+    fun lateSuccessCorrectsACompletedFailureWithoutResendingOrRearmingMonitoring() = runBlocking {
+        val incidents = SafetyIncidentRepository(AppDatabase.getDatabase(context))
+        incidents.getOrCreate("sos:1000", "sos", 1_000L, "test", "test", null, 1,
+            listOf(Contact(id = 1, name = "guardian", phoneNumber = "01012345678")))
+        val eventId = "sos:1000:1"
+        val dispatch = SmsDispatchStore(context)
+        var nowMs = 2_000L
+        var attempt = 0
+        repeat(SmsDispatchStore.MAX_ATTEMPTS) {
+            attempt = dispatch.beginAttempt(eventId, 1, nowMs = nowMs)!!
+            dispatch.markQueuedTimeoutIfNeeded(eventId, nowMs + SmsDispatchStore.CALLBACK_TIMEOUT_MS)
+            nowMs += SmsDispatchStore.CALLBACK_TIMEOUT_MS + SmsDispatchStore.RETRY_DELAY_MS
+        }
+        val task = SafetySmsRetryTask(context)
+        task.run(eventId, nowMs)
+        val manager = context.getSystemService(NotificationManager::class.java)
+        assertTrue(manager.activeNotifications.any { it.tag == "sos:1000" && it.id == SafetySmsStatusNotifier.NOTIFICATION_ID })
+        val completedAt = incidents.get("sos:1000")!!.incident.completedAtMs
+        val monitor = MonitoringStore(context)
+        val deadline = monitor.deadlineMs
+        dispatch.recordCallback(SmsCallbackStage.SENT, eventId, attempt, 0, 1, Activity.RESULT_OK, nowMs + 1)
+
+        assertNull(task.run(eventId, nowMs + 2))
+
+        assertEquals(listOf(SafetySmsStatusNotifier.CONFIRMED_NOTIFICATION_ID), manager.activeNotifications.map { it.id })
+        assertEquals(SmsDispatchStore.MAX_ATTEMPTS, dispatch.status(eventId).attempt)
+        assertEquals("SENT", incidents.get("sos:1000")!!.recipients.single().dispatchState)
+        assertEquals(completedAt, incidents.get("sos:1000")!!.incident.completedAtMs)
+        assertEquals("", incidents.get("sos:1000")!!.recipients.single().phoneNumber)
+        assertEquals(deadline, monitor.deadlineMs)
+    }
+
+    @Test fun recoveryRepairsAMissedClockBroadcastAndPersistsTheFinalFailure() = runBlocking {
+        ShadowSystemClock.advanceBy(Duration.ofMinutes(10))
+        val incidents = SafetyIncidentRepository(AppDatabase.getDatabase(context))
+        incidents.getOrCreate("sos:1000", "sos", 1_000L, "test", "test", null, 1,
+            listOf(Contact(id = 1, name = "guardian", phoneNumber = "01012345678")))
+        val eventId = "sos:1000:1"
+        val dispatch = SmsDispatchStore(context)
+        val future = System.currentTimeMillis() + 3_600_000L
+        var at = future
+        repeat(2) {
+            val attempt = dispatch.beginAttempt(eventId, 1, nowMs = at)!!
+            dispatch.markQueueFailure(eventId, attempt, -1, at)
+            at += SmsDispatchStore.RETRY_DELAY_MS
+        }
+        dispatch.beginAttempt(eventId, 1, nowMs = at,
+            elapsedRealtimeMs = SystemClock.elapsedRealtime() - SmsDispatchStore.CALLBACK_TIMEOUT_MS)
+        incidents.recordStatus(eventId, dispatch.status(eventId))
+        assertEquals("QUEUED", incidents.recipient(eventId)?.dispatchState)
+
+        val worker = TestListenableWorkerBuilder<SafetySmsRetryWorker>(context).build()
+        assertTrue(worker.startWork().get(5, TimeUnit.SECONDS) is ListenableWorker.Result.Success)
+
+        assertEquals(SmsDispatchState.FAILED_FINAL, dispatch.status(eventId).state)
+        assertEquals("FAILED_FINAL", incidents.recipient(eventId)?.dispatchState)
+        assertEquals(3, incidents.recipient(eventId)?.attemptCount)
+        assertTrue(incidents.get("sos:1000")!!.incident.completedAtMs != null)
     }
 
     @Test

@@ -15,6 +15,8 @@ import com.example.data.AppDatabase
 import com.example.data.DeadlineCalculator
 import com.example.data.LifeLinkRepository
 import com.example.data.MonitoringStore
+import com.example.data.MonitoringSnapshot
+import com.example.data.MonitoringRuntimeState
 import com.example.data.SafetyIncidentRepository
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -23,7 +25,8 @@ internal class InactivityDeadlineTask(
     context: Context,
     private val store: MonitoringStore = MonitoringStore(context.applicationContext),
     private val repository: LifeLinkRepository = LifeLinkRepository(AppDatabase.getDatabase(context)),
-    private val incidents: SafetyIncidentRepository = SafetyIncidentRepository(AppDatabase.getDatabase(context))
+    private val incidents: SafetyIncidentRepository = SafetyIncidentRepository(AppDatabase.getDatabase(context)),
+    private val readSnapshot: (Long) -> MonitoringSnapshot = store::snapshot
 ) {
     private val appContext = context.applicationContext
 
@@ -33,13 +36,14 @@ internal class InactivityDeadlineTask(
         elapsedRealtimeMs: Long = SystemClock.elapsedRealtime()
     ) = RUN_LOCK.withLock {
         store.rebaseAfterWallClockChange(nowMs, elapsedRealtimeMs)
-        val snapshot = store.snapshot(nowMs)
+        val snapshot = readSnapshot(nowMs)
         if (!snapshot.desiredEnabled || !store.isSetupCurrent || snapshot.deadlineMs <= 0L ||
             (expectedDeadlineMs != null && expectedDeadlineMs != snapshot.deadlineMs)
         ) return@withLock
 
         val deadlineMs = snapshot.deadlineMs
-        val eventMs = store.inactivityEventMs
+        // Deadline and incident identity must come from the same activity cycle.
+        val eventMs = snapshot.inactivityEventMs
         if (store.wasEmergencyDispatched(eventMs)) return@withLock
         if (snapshot.remainingSeconds in 1..DeadlineCalculator.PRE_ALERT_SECONDS &&
             store.markPreAlert(deadlineMs) { showPreAlert(deadlineMs) }
@@ -61,7 +65,8 @@ internal class InactivityDeadlineTask(
                 message = EmergencyMessageBuilder.build(
                     store.deviceAlias, battery, snapshot.lastActivityMs,
                     store.monitorHours.takeIf { store.debugMonitorMinutes == 0 },
-                    deadlineMs = deadlineMs, evaluatedAtMs = nowMs
+                    deadlineMs = deadlineMs, evaluatedAtMs = nowMs,
+                    monitoringInterrupted = snapshot.runtimeState != MonitoringRuntimeState.RUNNING
                 ),
                 batteryPercent = battery,
                 canCreateIncident = { store.desiredEnabled && store.inactivityEventMs == eventMs }

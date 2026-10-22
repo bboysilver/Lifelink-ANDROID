@@ -163,4 +163,19 @@ class SafetyIncidentRepositoryTest {
         repository.updateRecipientStatus(eventId, 2, "SENT", 2_000L)
         assertEquals("SENT", repository.recipient(eventId)?.dispatchState)
     }
+
+    @Test fun clockRollbackAllowsFailureButNotAStaleQueueToOverwriteIt() = runBlocking {
+        repository.getOrCreate("sos:1000", "sos", 1_000L, "test", "SOS", null, 1,
+            listOf(Contact(id = 1, name = "guardian", phoneNumber = "01012345678")))
+        val id = "sos:1000:1"
+        repository.updateRecipientStatus(id, 3, "QUEUED", 7_200_000L)
+        repository.updateRecipientStatus(id, 3, "FAILED_FINAL", 1_000L)
+        assertEquals("FAILED_FINAL", repository.recipient(id)?.dispatchState)
+        repository.updateRecipientStatus(id, 3, "QUEUED", 7_200_001L)
+        assertEquals("FAILED_FINAL", repository.recipient(id)?.dispatchState)
+        repository.updateRecipientStatus(id, 2, "SENT", 7_200_002L)
+        assertEquals("FAILED_FINAL", repository.recipient(id)?.dispatchState)
+        repository.updateRecipientStatus(id, 3, "SENT", 500L)
+        assertEquals("SENT", repository.recipient(id)?.dispatchState)
+    }
 }

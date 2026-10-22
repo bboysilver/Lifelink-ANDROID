@@ -5,6 +5,29 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class EmergencyMessageBuilderTest {
+    @Test fun onTimeCheckWithInterruptedMonitoringExplainsMissingCoverage() {
+        val deadline = 1_700_000_000_000L
+        val message = EmergencyMessageBuilder.build("사용자", 72, deadline - 6 * 3_600_000L, 6,
+            deadlineMs = deadline, evaluatedAtMs = deadline, monitoringInterrupted = true)
+        assertTrue(message.contains("활동 감시 상태 확인 불가"))
+        assertTrue(message.contains("활동 기록이 누락됐을 수 있습니다"))
+        assertFalse(message.contains("지연 점검"))
+        val normal = EmergencyMessageBuilder.build("사용자", 72, deadline - 6 * 3_600_000L, 6,
+            deadlineMs = deadline, evaluatedAtMs = deadline)
+        assertFalse(normal.contains("활동 감시 상태 확인 불가"))
+    }
+
+    @Test fun everyRealAlertExplainsDirectContactAndNoAutomaticDispatch() {
+        listOf(EmergencyMessageBuilder.build("사용자", 72),
+            EmergencyMessageBuilder.buildSos("사용자", 1_700_000_000_000L),
+            EmergencyMessageBuilder.buildDailyCheckInMissed("사용자")).forEach { message ->
+            assertTrue(message.contains("직접 연락"))
+            assertTrue(message.contains("다른 보호자"))
+            assertTrue(message.contains("응급상황이 의심되면 기다리지 말고 119"))
+            assertTrue(message.contains("앱이 자동 신고하지는 않습니다"))
+        }
+        assertFalse(EmergencyMessageBuilder.buildTest("사용자").contains("119"))
+    }
     @Test
     fun guardianIsToldNotToWaitForAnotherPeriodicWarning() {
         val message = EmergencyMessageBuilder.build("사용자", 72, 1_700_000_000_000L, 6)
