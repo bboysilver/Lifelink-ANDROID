@@ -19,12 +19,9 @@ class MonitoringWatchdogWorker(
     override suspend fun doWork(): Result {
         val store = MonitoringStore(applicationContext)
         val snapshot = store.snapshot()
-        val message = MonitoringWatchdogPolicy.interruptionMessage(snapshot) ?: return Result.success()
-        val alertToken = MonitoringWatchdogPolicy.alertToken(snapshot)
-        if (!store.claimWatchdogAlert(alertToken)) return Result.success()
-
-        store.markServiceError(message)
-        MonitoringStatusNotifier.showUnexpectedStop(applicationContext, message)
+        store.claimWatchdogInterruption(snapshot) { message ->
+            MonitoringStatusNotifier.showUnexpectedStop(applicationContext, message)
+        }
         return Result.success()
     }
 

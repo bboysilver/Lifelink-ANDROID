@@ -5,7 +5,6 @@ import android.app.Activity
 import android.app.Notification
 import android.app.NotificationManager
 import android.content.Context
-import android.os.SystemClock
 import androidx.test.core.app.ApplicationProvider
 import androidx.work.ListenableWorker
 import androidx.work.WorkManager
@@ -56,6 +55,7 @@ class SafetySmsRetryWorkerTest {
         store.markTestSmsPending(1, eventId)
         val dispatch = SmsDispatchStore(context)
         dispatch.beginAttempt(eventId, 1, SmsRetryPolicy.ONE_SHOT, 1_000L)
+        ShadowSystemClock.advanceBy(Duration.ofMillis(SmsDispatchStore.CALLBACK_TIMEOUT_MS))
 
         val next = SafetySmsRetryTask(context).run(eventId, 1_000L + SmsDispatchStore.CALLBACK_TIMEOUT_MS)
 
@@ -63,6 +63,25 @@ class SafetySmsRetryWorkerTest {
         assertEquals(TestSmsVerificationState.FAILED, store.testSmsVerification.state)
         assertEquals(1, dispatch.status(eventId).attempt)
         assertEquals(SmsDispatchState.FAILED_FINAL, dispatch.status(eventId).state)
+    }
+
+    @Test fun testSmsRecoveryRepairsVerificationAfterAnInterruptedCallback() = runBlocking {
+        val eventId = "test:1000:1"
+        val store = MonitoringStore(context)
+        store.markTestSmsPending(1, eventId)
+        val dispatch = SmsDispatchStore(context)
+        val attempt = dispatch.beginAttempt(eventId, 1, SmsRetryPolicy.ONE_SHOT)!!
+        context.getSharedPreferences(SmsDispatchStore.FILE_NAME, Context.MODE_PRIVATE).edit()
+            .putBoolean("part:SENT:$eventId:$attempt:0", true).commit()
+
+        assertNull(SafetySmsRetryTask(context).run(eventId))
+        assertEquals(TestSmsVerificationState.SUCCESS, store.testSmsVerification.state)
+        assertEquals(1, dispatch.status(eventId).attempt)
+
+        store.markTestSmsPending(1, "test:2000:1")
+        assertNull(SafetySmsRetryTask(context).run(eventId))
+        assertEquals(TestSmsVerificationState.PENDING, store.testSmsVerification.state)
+        assertEquals("test:2000:1", store.testSmsVerification.eventId)
     }
 
     @Test
@@ -162,6 +181,7 @@ class SafetySmsRetryWorkerTest {
             val attempt = dispatch.beginAttempt(eventId, 1, nowMs = nowMs)!!
             dispatch.markQueueFailure(eventId, attempt, android.telephony.SmsManager.RESULT_ERROR_NO_SERVICE, nowMs)
             nowMs += SmsDispatchStore.RETRY_DELAY_MS
+            ShadowSystemClock.advanceBy(Duration.ofMillis(SmsDispatchStore.RETRY_DELAY_MS))
         }
 
         assertNull(SafetySmsRetryTask(context).run(eventId, nowMs))
@@ -186,8 +206,10 @@ class SafetySmsRetryWorkerTest {
         var attempt = 0
         repeat(SmsDispatchStore.MAX_ATTEMPTS) {
             attempt = dispatch.beginAttempt(eventId, 1, nowMs = nowMs)!!
+            ShadowSystemClock.advanceBy(Duration.ofMillis(SmsDispatchStore.CALLBACK_TIMEOUT_MS))
             dispatch.markQueuedTimeoutIfNeeded(eventId, nowMs + SmsDispatchStore.CALLBACK_TIMEOUT_MS)
             nowMs += SmsDispatchStore.CALLBACK_TIMEOUT_MS + SmsDispatchStore.RETRY_DELAY_MS
+            ShadowSystemClock.advanceBy(Duration.ofMillis(SmsDispatchStore.RETRY_DELAY_MS))
         }
         val task = SafetySmsRetryTask(context)
         task.run(eventId, nowMs)
@@ -221,9 +243,10 @@ class SafetySmsRetryWorkerTest {
             val attempt = dispatch.beginAttempt(eventId, 1, nowMs = at)!!
             dispatch.markQueueFailure(eventId, attempt, -1, at)
             at += SmsDispatchStore.RETRY_DELAY_MS
+            ShadowSystemClock.advanceBy(Duration.ofMillis(SmsDispatchStore.RETRY_DELAY_MS))
         }
-        dispatch.beginAttempt(eventId, 1, nowMs = at,
-            elapsedRealtimeMs = SystemClock.elapsedRealtime() - SmsDispatchStore.CALLBACK_TIMEOUT_MS)
+        dispatch.beginAttempt(eventId, 1, nowMs = at)
+        ShadowSystemClock.advanceBy(Duration.ofMillis(SmsDispatchStore.CALLBACK_TIMEOUT_MS))
         incidents.recordStatus(eventId, dispatch.status(eventId))
         assertEquals("QUEUED", incidents.recipient(eventId)?.dispatchState)
 
