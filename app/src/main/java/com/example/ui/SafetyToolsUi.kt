@@ -131,7 +131,9 @@ internal fun SafetyDiagnosticsDialog(
     onRefresh: () -> Unit,
     onRepairSetup: () -> Unit,
     onDismiss: () -> Unit,
-    onOpenFieldVisit: (() -> Unit)? = null
+    onOpenFieldVisit: (() -> Unit)? = null,
+    actualSmsObservation: SmsObservation? = null,
+    testSmsObservation: SmsObservation? = null
 ) {
     val context = LocalContext.current
     var settingsError by remember { mutableStateOf(false) }
@@ -179,6 +181,9 @@ internal fun SafetyDiagnosticsDialog(
                 Text("어떤 활동을 감지하나요?", fontWeight = FontWeight.Bold)
                 Text(ACTIVITY_DETECTION_GUIDANCE)
                 DiagnosticLine("마지막 문자 발송 확인 · 시험 문자 포함", diagnosticTime(lastSmsSentAtMs))
+                DiagnosticLine("최근 실제 경고 문자 · 수신자1명 결과", actualSmsObservation.stateAt(report.checkedAtMs).label)
+                DiagnosticLine("최근 시험 문자 · 설정 검증용", testSmsObservation.stateAt(report.checkedAtMs).label)
+                Text("기록이 없거나 읽는 중이면 미확인입니다. 결과 대기는 발송 성공이 아니며, 전달 미확인은 실패 확정도 아닙니다.")
                 Text("문자 발송·전달 확인은 보호자가 읽었거나 안부를 확인했다는 뜻이 아닙니다.")
                 DiagnosticLine("활동 센서 지원", if (report.environment.hasActivitySensor) "센서 있음 · 실제 감지 이력은 위에서 확인" else "지원 센서 없음")
                 Text(report.environment.activitySensorSummary)

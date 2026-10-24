@@ -333,7 +333,9 @@ internal fun DashboardTab(
                 openSetup()
             },
             onDismiss = { showDiagnostics = false },
-            onOpenFieldVisit = { showDiagnostics = false; showFieldVisit = true }
+            onOpenFieldVisit = { showDiagnostics = false; showFieldVisit = true },
+            actualSmsObservation = actualSmsObservation,
+            testSmsObservation = testSmsObservation
         )
     }
 
