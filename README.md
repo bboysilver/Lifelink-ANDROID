@@ -57,7 +57,7 @@ LifeLink는 일정 시간 동안 휴대전화 활동이 감지되지 않으면 �
 
 ## 개발 빌드
 
-G0/G1 검토 브랜치의 현장 관찰 개선과 미실행 항목은 [기준선 증빙](docs/roadmap-g0-evidence.md), [G1 변경안](docs/roadmap-g1-release-notes.md), [수동 시험표](docs/roadmap-g1-device-test-plan.md)에 기록합니다. 이 변경안은 Play 배포·기관 운영 승인이 아니며 앱 버전 번호와 기존 안전 엔진은 유지합니다.
+G0/G1 검토 브랜치의 현장 관찰 개선과 미실행 항목은 [기준선 증빙](docs/roadmap-g0-evidence.md), [G1 변경안](docs/roadmap-g1-release-notes.md), [수동 시험표](docs/roadmap-g1-device-test-plan.md)에 기록합니다. 검증 당시 버전은2.3.9(47)이며, 후속 Closed testing 업로드 승인으로2.3.10(48)을 준비합니다. 기존 안전 엔진은 유지하며 공개 출시·기관 운영 승인을 뜻하지 않습니다.
 
 요구 사항은 Android Studio JBR(Java 21)와 Android SDK 37.0입니다. 최소 지원 API 24와 target API 36, 앱 JVM 타깃 17은 유지합니다. Kotlin/Compose compiler 2.4.21을 명시적으로 맞추며 Gradle 9.3.1과 AGP 9.1.1 호환 조합을 사용합니다.
 
