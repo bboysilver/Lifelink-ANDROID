@@ -10,6 +10,7 @@ import android.os.BatteryManager
 import android.os.SystemClock
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
+import androidx.core.net.toUri
 import com.example.MainActivity
 import com.example.data.AppDatabase
 import com.example.data.DeadlineCalculator
@@ -46,7 +47,7 @@ internal class InactivityDeadlineTask(
         val eventMs = snapshot.inactivityEventMs
         if (store.wasEmergencyDispatched(eventMs)) return@withLock
         if (snapshot.remainingSeconds in 1..DeadlineCalculator.PRE_ALERT_SECONDS &&
-            store.markPreAlert(deadlineMs) { showPreAlert(deadlineMs) }
+            store.markPreAlert(deadlineMs, eventMs) { showPreAlert(deadlineMs, eventMs) }
         ) {
             repository.insertLog("ALERT_WARNING", "설정된 안심 시간 종료 30분 전 사전 알림을 표시했습니다.")
         }
@@ -99,13 +100,15 @@ internal class InactivityDeadlineTask(
         InactivityDeadlineScheduler(appContext).ensureScheduled(nowMs)
     }
 
-    private fun showPreAlert(deadlineMs: Long): Boolean {
+    private fun showPreAlert(deadlineMs: Long, eventMs: Long): Boolean {
         val safeIntent = PendingIntent.getBroadcast(
             appContext,
             1,
             Intent(appContext, InactivityDeadlineReceiver::class.java)
                 .setAction(InactivityDeadlineReceiver.ACTION_SAFE)
-                .putExtra(InactivityDeadlineScheduler.EXTRA_DEADLINE, deadlineMs),
+                .setData("lifelink://inactivity-response/$eventMs".toUri())
+                .putExtra(InactivityDeadlineScheduler.EXTRA_DEADLINE, deadlineMs)
+                .putExtra(InactivityDeadlineReceiver.EXTRA_EVENT_MS, eventMs),
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
         return notify(

@@ -30,6 +30,7 @@ import com.example.monitoring.EmergencySmsSender
 import com.example.monitoring.MaintenanceWorker
 import com.example.monitoring.MonitoringService
 import com.example.monitoring.SafetyNotificationCapability
+import com.example.monitoring.SafetySmsRetryWorker
 import com.example.monitoring.SmsDeviceManager
 import com.example.monitoring.SmsDispatchStore
 import com.example.monitoring.SmsQueueResult
@@ -202,6 +203,10 @@ class LifeLinkViewModel(application: Application) : AndroidViewModel(application
             monitoringStore.initializeDeadlineIfMissing()
             dailyCheckInScheduler.ensureScheduled()
             MaintenanceWorker.ensureScheduled(context)
+            val pendingTest = monitoringStore.testSmsVerification
+            if (pendingTest.state == TestSmsVerificationState.PENDING) {
+                SafetySmsRetryWorker.enqueueAt(context, pendingTest.eventId, System.currentTimeMillis())
+            }
             refreshSmsSetup()
             startTicker()
         }
