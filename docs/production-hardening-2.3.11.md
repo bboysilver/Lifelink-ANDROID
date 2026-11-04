@@ -17,7 +17,17 @@
 - 기존 구현에서 추가한 회귀 4개가 실패한 것을 확인했습니다. 수정 및 시계 보정 검사 추가 후 두 관련 클래스 **26개 통과**(실패/오류/건너뜀 0). Robolectric은 실제 통신사 발송 시험이 아닙니다.
 - JDK 21, Android SDK 37 환경에서 `test lint assembleDebug bundleRelease --rerun-tasks` 성공(107개 작업 실행). 테스트 362개 / 53개 스위트, 실패·오류·건너뜀 0. Lint는 문제 없음. 테스트 픽스처의 SQLite CloseGuard 및 일부 deprecated API 빌드 경고는 남아 있습니다.
 - 로컬 AAB는 미서명이며 Play 업로드용이 아닙니다. `bundletool validate` 통과, 번들 설정 `PAGE_ALIGNMENT_16K`, 디버그 APK `zipalign -c -P 16 4` 통과. Play 배포용 검증에는 별도 서명 AAB와 업로드 인증서 확인이 필요합니다.
+- 소스 커밋 `1c6defac1a5cd0185290fd67bfc3c1850f565c75`의 [PR 검증](https://github.com/bboysilver/Lifelink-ANDROID/actions/runs/41831680244)과 [서명 빌드](https://github.com/bboysilver/Lifelink-ANDROID/actions/runs/41831672905) 성공. 서명 작업 4분 56초. CI 산출물의 테스트도 362개 / 53개 스위트, 실패·오류·건너뜀 0, Lint 문제 없음.
+- 서명 AAB `release-artifacts/2.3.11-49/lifelink-2.3.11-49-signed.aab`(Git 제외), 4,197,221바이트. SHA-256 `4C51A38097EAEDA8C5112E1340668FCC4D541660F038DEA267B865685EBAB8A9`는 CI 체크섬과 일치. 업로드 인증서 SHA-256 `862CB532B1485B1AA97F7731716333C71A4D5A49AEC102D4026BFDB8226110CC`는 기존 인증서 및 CI 기록과 일치. CI strict 검증 및 로컬 `jar verified` 확인. 로컬 truststore 미지정으로 자체 서명/인증서 체인/타임스탬프 경고가 있고, 기존 POSIX 속성 및 JarFile/JarInputStream 항목 순서 경고도 남아 있습니다.
+- 실제 서명 파일의 `bundletool validate` 통과, `com.bboysilver.lifelink` 2.3.11(49), min24/target36, 2.3.10과 권한 11개 동일, AD_ID/INTERNET/위치 권한 없음. 서명 번들 `PAGE_ALIGNMENT_16K` 및 4개 ABI의 네이티브 라이브러리 ELF LOAD 16KB 정렬 확인. Play 분할 APK의 실기기 설치/실행까지 검증했다는 뜻은 아닙니다.
 - API 24 이상, target 36 유지. [Google Play 대상 API 요건](https://support.google.com/googleplay/android-developer/answer/11926878), [16KB 페이지 지원 확인 방법](https://developer.android.com/guide/practices/page-sizes).
+
+## Play Console 저장 결과
+
+- 11월 4일 사용자 승인에 따라 기존 Closed test 1에 위 서명 AAB와 한국어 릴리스 노트를 업로드하고 `Save`로 저장했습니다. 이전 버전 48은 새 릴리스에 포함하지 않았으며, 현재 배포본 자체는 중지하거나 삭제하지 않았습니다.
+- Play가 49(2.3.11), API 24+, target 36, 4개 ABI와 ReTrace 매핑을 인식했습니다. 검토 화면 차단 오류 0, 비차단 경고 1(네이티브 디버그 심볼 미제공). 지원 단말 추가·감소 0입니다.
+- 게시 개요에 `Changes not yet submitted for review` / `Submit 1 change for review`와 2.3.11 한 건이 표시됩니다. 자동 사전 확인은 당시 진행 중이었습니다. 업로드·저장 완료이며, 심사 제출·승인·테스터 배포·프로덕션 신청은 하지 않았습니다. 테스터·국가·다른 트랙·정책 선언은 변경하지 않았습니다.
+- 완료 화면: `release-artifacts/2.3.11-49/play-upload-saved.jpg`(Git 제외). 테스터는 승인·배포 전까지 기존 2.3.10을 그대로 사용합니다.
 
 ## Closed testing 현장 확인
 
