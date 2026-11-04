@@ -57,6 +57,10 @@ LifeLink는 일정 시간 동안 휴대전화 활동이 감지되지 않으면 �
 
 ## 개발 빌드
 
+2026-11-02 프로덕션 접근 재신청의 추가14일 요구·실제 배포/설치 통계·남은 증빙은 [재테스트 운영안](docs/production-access-retest-2026-11-02.md)에 기록합니다. [테스터 전달용 안내](docs/closed-test-tester-guide-ko.md)와 [제출 전 답변 초안](docs/production-access-answers-draft.md)을 사용하며, 실제 결과 없이 승인·현장 검증 완료로 표시하지 않습니다.
+
+G0/G1 검토 브랜치의 현장 관찰 개선과 미실행 항목은 [기준선 증빙](docs/roadmap-g0-evidence.md), [G1 변경안](docs/roadmap-g1-release-notes.md), [수동 시험표](docs/roadmap-g1-device-test-plan.md)에 기록합니다. 기준선 검증 당시 버전은2.3.9(47)이며,2.3.10(48)은10월24일 Closed test1에 배포된 상태를11월2일 확인했습니다([빌드·업로드 기록](docs/deployment-2.3.10.md)). 기존 안전 엔진은 유지하며 공개 출시·기관 운영 승인을 뜻하지 않습니다.
+
 요구 사항은 Android Studio JBR(Java 21)와 Android SDK 37.0입니다. 최소 지원 API 24와 target API 36, 앱 JVM 타깃 17은 유지합니다. Kotlin/Compose compiler 2.4.21을 명시적으로 맞추며 Gradle 9.3.1과 AGP 9.1.1 호환 조합을 사용합니다.
 
 ```powershell
