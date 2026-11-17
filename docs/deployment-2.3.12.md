@@ -35,3 +35,11 @@
 - 게시 개요에 Production 릴리스 및 기존 국가 설정 2건, 총 3건이 미제출 상태입니다. `Submit 3 changes for review` 버튼은 활성화됐고 자동 quick checks는 당시 진행 중입니다.
 - 현재 저장된 전 세계 범위(177개 국가·지역 + 나머지 지역)와 `Managed publishing off`에 따른 승인 후 자동 공개를 사용자에게 확인 요청했습니다. **해당 선택 답변을 받기 전에는 최종 리뷰 보내기를 누르지 않았습니다. 심사 제출·승인·공개 출시 완료가 아닙니다.**
 - 화면 증빙: `release-artifacts/2.3.12-50/production-ready-for-review.jpg`(Git 제외). 기존 서명·테스터·권한 선언·국가 설정·게시 방식은 변경하지 않았습니다.
+
+## 사용자 승인 후 심사 제출 — 2026-11-17
+
+- 사용자가 `현재 범위 유지, 승인 후 자동 출시`를 명시적으로 선택했습니다. 기존 177개 국가·지역 + 나머지 지역 및 Managed publishing off를 유지합니다.
+- 게시 개요의 제출 대상이 2.3.12(50) Production 릴리스와 기존 국가 설정 2건임을 다시 확인한 뒤 `Submit 3 changes for review` 및 확인 창의 `Send changes for review`를 실행했습니다.
+- 화면이 `Changes in review`로 변경됐고 동일한 3건이 표시됩니다. 최종 관찰 시 자동 quick checks는 진행 중이며, 성공적으로 끝나면 Google 심사로 전달된다는 안내와 최대 14분 남음 표시가 있었습니다. 이는 제출 요청 완료이며 Google의 승인이나 실제 공개 완료가 아닙니다.
+- 승인되면 현재 설정대로 자동 공개됩니다. 심사 중 추가 변경이나 재제출은 하지 않았습니다. main 병합·테스터 수정·새 권한·국가 범위 변경도 없습니다.
+- 제출 화면: `release-artifacts/2.3.12-50/production-submitted-for-review.jpg`(Git 제외).
