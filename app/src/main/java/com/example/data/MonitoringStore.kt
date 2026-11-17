@@ -128,11 +128,11 @@ class MonitoringStore(context: Context) {
         get() = isSetupCompleted && onboardingVersion >= CURRENT_ONBOARDING_VERSION
 
     val testSmsVerification: TestSmsVerification
-        get() {
+        get() = synchronized(ACTIVITY_LOCK) {
             val stateName = preferences.getString(KEY_TEST_SMS_STATE, null)
             val state = TestSmsVerificationState.entries.firstOrNull { it.name == stateName }
                 ?: TestSmsVerificationState.NOT_SENT
-            return TestSmsVerification(
+            TestSmsVerification(
                 state = state,
                 contactId = preferences.getInt(KEY_TEST_SMS_CONTACT_ID, -1),
                 eventId = preferences.getString(KEY_TEST_SMS_EVENT_ID, "").orEmpty(),
@@ -182,7 +182,7 @@ class MonitoringStore(context: Context) {
         }
     }
 
-    fun invalidateTestSmsVerification() {
+    fun invalidateTestSmsVerification() = synchronized(ACTIVITY_LOCK) {
         preferences.edit {
             putString(KEY_TEST_SMS_STATE, TestSmsVerificationState.NOT_SENT.name)
             remove(KEY_TEST_SMS_CONTACT_ID)
@@ -191,7 +191,7 @@ class MonitoringStore(context: Context) {
         }
     }
 
-    fun markTestSmsPending(contactId: Int, eventId: String) {
+    fun markTestSmsPending(contactId: Int, eventId: String) = synchronized(ACTIVITY_LOCK) {
         preferences.edit {
             putString(KEY_TEST_SMS_STATE, TestSmsVerificationState.PENDING.name)
             putInt(KEY_TEST_SMS_CONTACT_ID, contactId)
@@ -204,8 +204,12 @@ class MonitoringStore(context: Context) {
         eventId: String,
         state: TestSmsVerificationState,
         message: String
-    ) {
-        if (testSmsVerification.eventId != eventId) return
+    ) = synchronized(ACTIVITY_LOCK) {
+        val current = testSmsVerification
+        // Recovery and the modem callback may race. Never downgrade a confirmed send.
+        if (current.eventId != eventId ||
+            (current.state == TestSmsVerificationState.SUCCESS && state != TestSmsVerificationState.SUCCESS)
+        ) return@synchronized
         preferences.edit {
             putString(KEY_TEST_SMS_STATE, state.name)
             putString(KEY_TEST_SMS_MESSAGE, message)
@@ -746,12 +750,31 @@ class MonitoringStore(context: Context) {
             }
         }
     }
-    fun markPreAlert(deadlineMs: Long, postNotification: () -> Boolean = { true }): Boolean = synchronized(ACTIVITY_LOCK) {
-        if (!desiredEnabled || this.deadlineMs != deadlineMs || wasPreAlerted(deadlineMs)) return@synchronized false
+    fun markPreAlert(
+        deadlineMs: Long,
+        eventMs: Long = inactivityEventMs,
+        postNotification: () -> Boolean = { true }
+    ): Boolean = synchronized(ACTIVITY_LOCK) {
+        if (!desiredEnabled || this.deadlineMs != deadlineMs || inactivityEventMs != eventMs ||
+            wasPreAlerted(deadlineMs)
+        ) return@synchronized false
         // Posting and resetting share the lock, so late work cannot restore a stale warning.
         if (!postNotification()) return@synchronized false
         preferences.edit { putLong(KEY_PRE_ALERT_DEADLINE_MS, deadlineMs) }
         true
+    }
+
+    internal fun confirmInactivityWarning(
+        expectedDeadlineMs: Long,
+        expectedEventMs: Long,
+        nowMs: Long = System.currentTimeMillis(),
+        elapsedRealtimeMs: Long = SystemClock.elapsedRealtime()
+    ): Boolean = synchronized(ACTIVITY_LOCK) {
+        // Legacy notifications carry only the deadline; new actions survive a clock rebase.
+        val current = if (expectedEventMs > 0L) inactivityEventMs == expectedEventMs
+            else expectedDeadlineMs > 0L && deadlineMs == expectedDeadlineMs
+        if (!desiredEnabled || !current) return@synchronized false
+        recordActivity(nowMs, "사전 알림에서 직접 무사 확인", nowMs, elapsedRealtimeMs)
     }
 
     fun markEmergency(eventMs: Long): Boolean = synchronized(ACTIVITY_LOCK) {

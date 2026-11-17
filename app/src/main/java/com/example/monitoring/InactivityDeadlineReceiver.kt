@@ -22,10 +22,7 @@ class InactivityDeadlineReceiver : BroadcastReceiver() {
         val deadline = intent.getLongExtra(InactivityDeadlineScheduler.EXTRA_DEADLINE, 0L)
         if (deadline <= 0L) return
         if (intent.action == ACTION_SAFE) {
-            val store = MonitoringStore(context)
-            if (store.desiredEnabled && store.deadlineMs == deadline) {
-                store.recordActivity(System.currentTimeMillis(), "사전 알림에서 직접 무사 확인")
-            }
+            MonitoringStore(context).confirmInactivityWarning(deadline, intent.getLongExtra(EXTRA_EVENT_MS, 0L))
             return
         }
         if (intent.action != InactivityDeadlineScheduler.ACTION_CHECK) return
@@ -48,6 +45,7 @@ class InactivityDeadlineReceiver : BroadcastReceiver() {
 
     companion object {
         const val ACTION_SAFE = "com.bboysilver.lifelink.action.INACTIVITY_SAFE"
+        internal const val EXTRA_EVENT_MS = "inactivity_event_ms"
     }
 }
 

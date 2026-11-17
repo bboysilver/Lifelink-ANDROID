@@ -168,6 +168,57 @@ class InactivityDeadlineTest {
     }
 
     @Test
+    fun aPreviousWarningActionCannotConfirmTheNextInactivityCycle() = runBlocking {
+        val manager = context.getSystemService(NotificationManager::class.java)
+        fun warningAction() = manager.activeNotifications.single {
+            it.id == InactivityDeadlineTask.PRE_ALERT_NOTIFICATION_ID
+        }.notification.actions.single().actionIntent
+
+        val firstDeadline = store.deadlineMs
+        val firstWarningAt = firstDeadline - DeadlineCalculator.PRE_ALERT_SECONDS * 1_000L
+        task.run(firstDeadline, firstWarningAt, firstWarningAt - now)
+        val oldAction = warningAction()
+
+        val nextActivityAt = firstWarningAt + 1_000L
+        store.resetDeadline(nextActivityAt, "unlock", nextActivityAt - now)
+        val nextDeadline = store.deadlineMs
+        val nextEvent = store.inactivityEventMs
+        val nextWarningAt = nextDeadline - DeadlineCalculator.PRE_ALERT_SECONDS * 1_000L
+        task.run(nextDeadline, nextWarningAt, nextWarningAt - now)
+
+        assertNotEquals(oldAction, warningAction())
+        val staleIntent = shadowOf(oldAction).savedIntent
+        assertEquals(firstDeadline, staleIntent.getLongExtra(InactivityDeadlineScheduler.EXTRA_DEADLINE, 0L))
+        InactivityDeadlineReceiver().onReceive(context, staleIntent)
+        assertEquals(nextDeadline, store.deadlineMs)
+        assertEquals(nextEvent, store.inactivityEventMs)
+        assertEquals(nextActivityAt, store.snapshot(nextWarningAt).lastActivityMs)
+    }
+
+    @Test
+    fun theCurrentWarningStillConfirmsTheSameCycleAfterClockCorrection() = runBlocking {
+        val deadline = store.deadlineMs
+        val event = store.inactivityEventMs
+        val warningAt = deadline - DeadlineCalculator.PRE_ALERT_SECONDS * 1_000L
+        task.run(deadline, warningAt, warningAt - now)
+        val manager = context.getSystemService(NotificationManager::class.java)
+        val action = manager.activeNotifications.single().notification.actions.single().actionIntent
+        val intent = shadowOf(action).savedIntent
+
+        val correctedAt = warningAt + 3_600_000L
+        assertTrue(store.rebaseAfterWallClockChange(correctedAt, warningAt - now))
+        assertNotEquals(deadline, store.deadlineMs)
+        assertEquals(event, store.inactivityEventMs)
+        assertTrue(store.confirmInactivityWarning(
+            intent.getLongExtra(InactivityDeadlineScheduler.EXTRA_DEADLINE, 0L),
+            intent.getLongExtra(InactivityDeadlineReceiver.EXTRA_EVENT_MS, 0L),
+            correctedAt + 1_000L, warningAt - now + 1_000L
+        ))
+        assertNotEquals(event, store.inactivityEventMs)
+        assertEquals(correctedAt + 1_000L, store.snapshot(correctedAt + 1_000L).lastActivityMs)
+    }
+
+    @Test
     fun automaticActivityRemovesOnlyItsWarningAndStaleWorkCannotRestoreIt() = runBlocking {
         val manager = context.getSystemService(NotificationManager::class.java)
         val deadline = store.deadlineMs

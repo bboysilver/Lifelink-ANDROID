@@ -125,8 +125,13 @@ internal class SafetySmsRetryTask(
     private val appContext = context.applicationContext
     private val repository = LifeLinkRepository(AppDatabase.getDatabase(appContext))
 
-    suspend fun pendingEventIds(): List<String> =
-        incidents.pendingRecipients().map(SafetyRecipient::eventId)
+    suspend fun pendingEventIds(): List<String> = buildList {
+        addAll(incidents.pendingRecipients().map(SafetyRecipient::eventId))
+        val test = store.testSmsVerification
+        if (test.state == TestSmsVerificationState.PENDING && SmsDispatchStore.isTestEvent(test.eventId)) {
+            add(test.eventId)
+        }
+    }
 
     suspend fun run(eventId: String, nowMs: Long = System.currentTimeMillis()): Long? {
         if (SmsDispatchStore.isTestEvent(eventId)) {
@@ -141,6 +146,19 @@ internal class SafetySmsRetryTask(
                     eventId, TestSmsVerificationState.FAILED,
                     "시험 문자 발송을 확인하지 못했습니다. 보호자 수신 여부와 SIM 상태를 확인한 뒤 다시 시도해 주세요."
                 )
+                SmsDispatchState.NOT_QUEUED -> {
+                    val test = store.testSmsVerification
+                    if (test.eventId != eventId || test.state != TestSmsVerificationState.PENDING) return null
+                    // The app may have stopped before persisting the one-shot modem attempt.
+                    val requestedAt = eventId.split(':').getOrNull(1)?.toLongOrNull()
+                    if (requestedAt != null && requestedAt in 1..nowMs &&
+                        nowMs - requestedAt < SmsDispatchStore.CALLBACK_TIMEOUT_MS
+                    ) return requestedAt + SmsDispatchStore.CALLBACK_TIMEOUT_MS
+                    store.recordTestSmsResult(
+                        eventId, TestSmsVerificationState.FAILED,
+                        "시험 문자의 발송 여부를 확인하지 못했습니다. 보호자 수신 여부를 확인한 뒤 다시 시도해 주세요."
+                    )
+                }
                 else -> Unit
             }
             return if (status.state == SmsDispatchState.QUEUED) {

@@ -65,6 +65,45 @@ class SafetySmsRetryWorkerTest {
         assertEquals(SmsDispatchState.FAILED_FINAL, dispatch.status(eventId).state)
     }
 
+    @Test fun recoveryFindsAnInterruptedTestRequestAndNeverResendsIt() = runBlocking {
+        val requestedAt = 10_000L
+        val eventId = EmergencySmsSender.testEventId(requestedAt, 1)
+        val store = MonitoringStore(context)
+        store.markTestSmsPending(1, eventId)
+        // Simulate process loss before the SMS attempt or callback worker is persisted.
+        val recovered = SafetySmsRetryTask(context)
+        val expiry = requestedAt + SmsDispatchStore.CALLBACK_TIMEOUT_MS
+
+        assertTrue(eventId in recovered.pendingEventIds())
+        assertEquals(expiry, recovered.run(eventId, requestedAt + 1_000L))
+        assertEquals(TestSmsVerificationState.PENDING, store.testSmsVerification.state)
+        assertNull(recovered.run(eventId, expiry))
+        assertEquals(TestSmsVerificationState.FAILED, store.testSmsVerification.state)
+        assertEquals(0, SmsDispatchStore(context).status(eventId).attempt)
+    }
+
+    @Test fun recoveryDoesNotWaitIndefinitelyForATestRequestDatedInTheFuture() = runBlocking {
+        val store = MonitoringStore(context)
+        val eventId = EmergencySmsSender.testEventId(1_000_000L, 1)
+        store.markTestSmsPending(1, eventId)
+
+        assertNull(SafetySmsRetryTask(context).run(eventId, 1_000L))
+        assertEquals(TestSmsVerificationState.FAILED, store.testSmsVerification.state)
+        assertEquals(0, SmsDispatchStore(context).status(eventId).attempt)
+    }
+
+    @Test fun anOlderFailureCannotOverwriteAConfirmedTestSend() {
+        val store = MonitoringStore(context)
+        val eventId = EmergencySmsSender.testEventId(10_000L, 1)
+        store.markTestSmsPending(1, eventId)
+        store.recordTestSmsResult(eventId, TestSmsVerificationState.SUCCESS, "confirmed")
+
+        store.recordTestSmsResult(eventId, TestSmsVerificationState.FAILED, "stale timeout")
+
+        assertEquals(TestSmsVerificationState.SUCCESS, store.testSmsVerification.state)
+        assertEquals("confirmed", store.testSmsVerification.message)
+    }
+
     @Test fun testSmsRecoveryRepairsVerificationAfterAnInterruptedCallback() = runBlocking {
         val eventId = "test:1000:1"
         val store = MonitoringStore(context)

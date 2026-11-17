@@ -5,6 +5,7 @@ import com.example.data.SafetyReviewItem
 import com.example.monitoring.SmsDispatchState
 import com.example.monitoring.SmsDispatchStore
 import com.example.monitoring.SmsSetupState
+import com.example.monitoring.SmsSetupIssue
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -13,7 +14,7 @@ import java.util.TimeZone
 internal const val FIELD_VISIT_LIMITATION =
     "기기 내 기술 정보이며 이용자의 안전을 보장하지 않습니다. 실제 돌봄·119·24시간 관제를 대신하지 않습니다."
 internal const val FIELD_VISIT_ACTIVITY_NOTICE =
-    "기존 앱 동작에 따라 화면을 직접 열거나 조작하면 활동으로 감지될 수 있습니다. 점검 결과나 메모 자체가 안전 확인은 아닙니다."
+    "점검 중에도 모니터링은 계속됩니다. 앱을 열거나 조작하면 기존 동작에 따라 타이머가 갱신될 수 있습니다. 진입 전 조작도 이미 반영됐을 수 있으며, 점검 결과나 메모는 이용자 안전 확인이 아닙니다."
 
 internal enum class CheckResult(val label: String) {
     PASS("확인됨"), NEEDS_ACTION("조치 필요"), NOT_CHECKED("미확인")
@@ -75,11 +76,31 @@ internal data class FieldVisitReport(
         get() = when {
             diagnostics.environment.airplaneModeEnabled -> "감지·문자 설정 확인 필요 (비행기 모드)"
             !smsReady || contactCount < 1 -> "문자·보호자 설정 확인 필요"
+            diagnostics.environment.batteryPolicy == BatteryPolicy.RESTRICTED -> "백그라운드 제한 · 설정 확인 필요"
             else -> diagnostics.headline
         }
 
     val hasObservedActivity: Boolean
         get() = diagnostics.snapshot.lastActivityMs in 1..diagnostics.checkedAtMs
+
+    val installationChecks: List<CheckResult>
+        get() = listOf(
+            if (contactCount > 0) CheckResult.PASS else CheckResult.NOT_CHECKED,
+            when {
+                smsReady -> CheckResult.PASS
+                (smsSetup as? SmsSetupState.Blocked)?.issue == SmsSetupIssue.CHECKING -> CheckResult.NOT_CHECKED
+                else -> CheckResult.NEEDS_ACTION
+            },
+            if (diagnostics.environment.smsGranted) CheckResult.PASS else CheckResult.NEEDS_ACTION,
+            if (diagnostics.environment.activityGranted && diagnostics.environment.hasActivitySensor) CheckResult.PASS else CheckResult.NEEDS_ACTION,
+            if (diagnostics.environment.notificationsGranted) CheckResult.PASS else CheckResult.NEEDS_ACTION,
+            if (!diagnostics.environment.airplaneModeEnabled) CheckResult.PASS else CheckResult.NEEDS_ACTION,
+            when (diagnostics.environment.batteryPolicy) {
+                BatteryPolicy.UNRESTRICTED -> CheckResult.PASS
+                BatteryPolicy.UNKNOWN -> CheckResult.NOT_CHECKED
+                else -> CheckResult.NEEDS_ACTION
+            }
+        )
 }
 
 internal fun fieldVisitTime(timestampMs: Long, zone: TimeZone = TimeZone.getDefault()): String =
@@ -101,7 +122,8 @@ internal fun fieldVisitSummary(
     appendLine("앱 버전: $version / Android API $apiLevel")
     appendLine("모니터링: ${when {
         !report.diagnostics.snapshot.desiredEnabled -> "꺼짐"
-        report.diagnostics.monitoringConfirmed && report.smsReady && report.contactCount > 0 -> "기기 실행 확인"
+        report.diagnostics.monitoringConfirmed && report.smsReady && report.contactCount > 0 &&
+            report.diagnostics.environment.batteryPolicy != BatteryPolicy.RESTRICTED -> "기기 실행 확인"
         else -> "실행 확인 필요"
     }}")
     appendLine("서비스 응답: ${if (report.diagnostics.heartbeatFresh) "최근 응답 있음" else "최근 응답 미확인"} (시각 비공개)")

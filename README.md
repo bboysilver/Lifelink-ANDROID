@@ -57,6 +57,10 @@ LifeLink는 일정 시간 동안 휴대전화 활동이 감지되지 않으면 �
 
 ## 개발 빌드
 
+2026-11-02 프로덕션 접근 재신청의 추가14일 요구·실제 배포/설치 통계·남은 증빙은 [재테스트 운영안](docs/production-access-retest-2026-11-02.md)에 기록합니다. [테스터 전달용 안내](docs/closed-test-tester-guide-ko.md)와 [제출 전 답변 초안](docs/production-access-answers-draft.md)을 사용하며, 실제 결과 없이 승인·현장 검증 완료로 표시하지 않습니다.
+
+G0/G1 검토 브랜치의 현장 관찰 개선과 미실행 항목은 [기준선 증빙](docs/roadmap-g0-evidence.md), [G1 변경안](docs/roadmap-g1-release-notes.md), [수동 시험표](docs/roadmap-g1-device-test-plan.md)에 기록합니다. 기준선 검증 당시 버전은2.3.9(47)이며,2.3.10(48)은10월24일 Closed test1에 배포된 상태를11월2일 확인했습니다([빌드·업로드 기록](docs/deployment-2.3.10.md)). 기존 안전 엔진은 유지하며 공개 출시·기관 운영 승인을 뜻하지 않습니다.
+
 요구 사항은 Android Studio JBR(Java 21)와 Android SDK 37.0입니다. 최소 지원 API 24와 target API 36, 앱 JVM 타깃 17은 유지합니다. Kotlin/Compose compiler 2.4.21을 명시적으로 맞추며 Gradle 9.3.1과 AGP 9.1.1 호환 조합을 사용합니다.
 
 ```powershell
@@ -82,7 +86,7 @@ keyPassword=...
 
 Signed Android release 워크플로를 실행하려면 Actions secret에 ANDROID_UPLOAD_KEYSTORE_BASE64, ANDROID_UPLOAD_STORE_PASSWORD, ANDROID_UPLOAD_KEY_ALIAS, ANDROID_UPLOAD_KEY_PASSWORD를 등록하고 Repository Variable ANDROID_UPLOAD_CERT_SHA256에 업로드 인증서 지문을 설정합니다. 워크플로는 테스트와 lint를 실행하고 AAB 서명·인증서·SHA-256을 검증한 뒤 증빙 artifact로 보관합니다.
 
-릴리스 AAB는 `app/build/outputs/bundle/release/app-release.aab`에 생성됩니다. 앱 ID는 `com.bboysilver.lifelink`, 현재 버전은 `2.3.9 (47)`입니다. 공개 출시 준비 완료를 뜻하지 않으며, 실제 Closed testing 제출 상태는 별도 배포 기록으로 확인합니다. 기존 Play 앱에 올릴 때는 같은 업로드 인증서와 Play Console의 최신 versionCode보다 큰 번호를 사용해야 합니다.
+릴리스 AAB는 `app/build/outputs/bundle/release/app-release.aab`에 생성됩니다. 앱 ID는 `com.bboysilver.lifelink`, 현재 버전은 `2.3.12 (50)`입니다. 버전 번호만으로 공개 출시 승인이나 실기기 검증 완료를 뜻하지 않으며, 실제 제출 상태는 [배포 기록](docs/deployment-2.3.12.md)으로 확인합니다. 기존 Play 앱에 올릴 때는 같은 업로드 인증서와 Play Console의 최신 versionCode보다 큰 번호를 사용해야 합니다.
 
 최근 검토 결과와 정책·출시 조건은 [2026-10-03 검토](docs/review-2026-10-03.md)를 참고하세요.
 2.3.0 추가 기능과 베타 확인 항목은 [추가 기능 명세](docs/features-2.3.0.md)를 참고하세요.

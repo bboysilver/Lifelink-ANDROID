@@ -6,6 +6,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.darkColorScheme
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -17,6 +18,8 @@ import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.assertIsOff
 import androidx.compose.ui.test.assertWidthIsAtLeast
+import androidx.compose.ui.test.assertTextContains
+import androidx.compose.ui.test.assertTextEquals
 import androidx.compose.ui.test.junit4.StateRestorationTester
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
@@ -25,6 +28,7 @@ import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.test.core.app.ApplicationProvider
 import com.example.data.MonitoringRuntimeState
 import com.example.data.MonitoringSnapshot
@@ -182,5 +186,104 @@ class FieldVisitCheckUiTest {
         }
         composeRule.onNodeWithText("SMS 전달 확인: 0/1명", substring = true).performScrollTo().assertIsDisplayed()
         composeRule.onNodeWithText("이 단말에 기록한 메모:", substring = true).performScrollTo().assertIsDisplayed()
+    }
+
+    @Test fun baselineSurvivesLiveUpdatesRefreshAndSavedStateRestoration() {
+        val restoration = StateRestorationTester(composeRule)
+        var current by mutableStateOf(report)
+        var refreshes = 0
+        restoration.setContent { MaterialTheme { FieldVisitCheckScreen(current, { refreshes++ }, {}, {}) } }
+        val original = composeRule.onNodeWithTag("field_baseline").fetchSemanticsNode()
+            .config[SemanticsProperties.Text].single().text
+        composeRule.runOnIdle {
+            current = report.copy(diagnostics = report.diagnostics.copy(checkedAtMs = now + 60_000L,
+                snapshot = report.diagnostics.snapshot.copy(lastActivityMs = now + 1_000L,
+                    lastAutomaticActivityMs = now + 2_000L, lastHeartbeatMs = now + 3_000L)),
+                actualSms = SmsObservation(false, SmsObservationState.SENT, now + 4_000L))
+        }
+        composeRule.onNodeWithTag("field_baseline").assertTextEquals(original)
+        composeRule.onNodeWithTag("field_current").assertTextContains(fieldVisitTime(now + 2_000L), substring = true)
+        composeRule.onNodeWithTag("field_refresh").performScrollTo().performClick()
+        restoration.emulateSavedInstanceStateRestore()
+        composeRule.onNodeWithTag("field_baseline").assertTextEquals(original)
+        composeRule.onNodeWithTag("field_refresh_count").assertTextContains("1회", substring = true)
+        composeRule.runOnIdle { assertEquals(1, refreshes) }
+    }
+
+    @Test fun manualLabelsAndTestCounterDoNotChangeSafetyStateOrSendAnything() {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val monitoring = MonitoringStore(context)
+        monitoring.beginStart(now, elapsedRealtimeMs = 1_000L)
+        val dispatch = SmsDispatchStore(context)
+        val eventId = "emergency:$now:1"
+        dispatch.beginAttempt(eventId, 1)
+        val preferences = context.getSharedPreferences("lifelink_monitoring", Context.MODE_PRIVATE)
+        val before = preferences.all.toMap()
+        val smsBefore = dispatch.status(eventId)
+        val restoration = StateRestorationTester(composeRule)
+        restoration.setContent { MaterialTheme { FieldVisitCheckScreen(report, {}, {}, {}) } }
+        composeRule.onNodeWithTag("field_operator").performScrollTo().assertTextContains("미기록", substring = true).performClick()
+        composeRule.onNodeWithTag("field_operator_STAFF_REPORTED").performClick()
+        composeRule.onNodeWithTag("field_test_count").assertTextContains("0/7건", substring = true)
+        composeRule.onNodeWithTag("field_test_INSTALLATION").performScrollTo().performClick()
+        composeRule.onNodeWithTag("field_test_INSTALLATION_DIFFERENT").performClick()
+        restoration.emulateSavedInstanceStateRestore()
+        composeRule.onNodeWithTag("field_operator").assertTextContains("직접 표시", substring = true)
+        composeRule.onNodeWithTag("field_test_count").assertTextContains("1/7건", substring = true)
+        composeRule.onNodeWithTag("field_preview").performScrollTo().performClick()
+        composeRule.onNodeWithTag("field_share_text").assertTextContains("수동 선택", substring = true)
+        composeRule.onNodeWithTag("field_share").performScrollTo().assertIsNotEnabled()
+        composeRule.onNodeWithTag("field_close").performClick()
+        composeRule.runOnIdle {
+            assertEquals(before, preferences.all)
+            assertEquals(smsBefore, dispatch.status(eventId))
+            assertNull(org.robolectric.Shadows.shadowOf(context as android.app.Application).nextStartedActivity)
+        }
+    }
+
+    @Test fun previewIsFrozenWhenLaterObservationsChangeAndCancelDoesNotUseClipboard() {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val clipboard = context.getSystemService(android.content.ClipboardManager::class.java)
+        clipboard.setPrimaryClip(android.content.ClipData.newPlainText("existing", "leave unchanged"))
+        var current by mutableStateOf(report)
+        composeRule.setContent { MaterialTheme { FieldVisitCheckScreen(current, {}, {}, {}) } }
+        composeRule.onNodeWithTag("field_preview").performScrollTo().performClick()
+        val original = composeRule.onNodeWithTag("field_share_text").fetchSemanticsNode().config[SemanticsProperties.Text].single().text
+        composeRule.runOnIdle { current = report.copy(testSms = SmsObservation(true, SmsObservationState.DELIVERED, now)) }
+        composeRule.onNodeWithTag("field_share_text").assertTextEquals(original)
+        composeRule.onNodeWithTag("field_close").performClick()
+        composeRule.runOnIdle { assertEquals("leave unchanged", clipboard.primaryClip!!.getItemAt(0).text.toString()) }
+    }
+
+    @Test @Config(qualifiers = "w640dp-h360dp-land")
+    fun manualLabelsAndCloseAreAccessibleInDarkLandscapeAtTwoHundredPercent() {
+        composeRule.setContent {
+            CompositionLocalProvider(LocalDensity provides Density(1f, 2f)) {
+                MaterialTheme(colorScheme = darkColorScheme()) { FieldVisitCheckScreen(report, {}, {}, {}) }
+            }
+        }
+        composeRule.onNodeWithTag("field_operator").performScrollTo().assertIsDisplayed().performClick()
+        composeRule.onNodeWithTag("field_operator_UNKNOWN").performClick()
+        composeRule.onNodeWithTag("field_test_SOS").performScrollTo().assertIsDisplayed()
+        composeRule.onNodeWithTag("field_preview").performScrollTo().assertIsDisplayed()
+        composeRule.onNodeWithTag("field_close").assertIsDisplayed()
+    }
+
+    @Test fun closingAndReopeningStartsANewInspectionRatherThanReusingOldLabels() {
+        var current by mutableStateOf(report)
+        var shown by mutableStateOf(true)
+        composeRule.setContent { MaterialTheme {
+            if (shown) FieldVisitCheckScreen(current, {}, {}, { shown = false })
+        } }
+        composeRule.onNodeWithTag("field_operator").performScrollTo().performClick()
+        composeRule.onNodeWithTag("field_operator_STAFF_REPORTED").performClick()
+        composeRule.onNodeWithTag("field_close").performClick()
+        composeRule.runOnIdle {
+            current = report.copy(testSms = SmsObservation(true, SmsObservationState.SENT, now))
+            shown = true
+        }
+        composeRule.onNodeWithTag("field_operator").assertTextContains("미기록", substring = true)
+        composeRule.onNodeWithTag("field_baseline").assertTextContains(SmsObservationState.SENT.label, substring = true)
+        composeRule.onNodeWithTag("field_test_count").assertTextContains("0/7건", substring = true)
     }
 }
