@@ -86,7 +86,7 @@ keyPassword=...
 
 Signed Android release 워크플로를 실행하려면 Actions secret에 ANDROID_UPLOAD_KEYSTORE_BASE64, ANDROID_UPLOAD_STORE_PASSWORD, ANDROID_UPLOAD_KEY_ALIAS, ANDROID_UPLOAD_KEY_PASSWORD를 등록하고 Repository Variable ANDROID_UPLOAD_CERT_SHA256에 업로드 인증서 지문을 설정합니다. 워크플로는 테스트와 lint를 실행하고 AAB 서명·인증서·SHA-256을 검증한 뒤 증빙 artifact로 보관합니다.
 
-릴리스 AAB는 `app/build/outputs/bundle/release/app-release.aab`에 생성됩니다. 앱 ID는 `com.bboysilver.lifelink`, 현재 버전은 `2.3.9 (47)`입니다. 공개 출시 준비 완료를 뜻하지 않으며, 실제 Closed testing 제출 상태는 별도 배포 기록으로 확인합니다. 기존 Play 앱에 올릴 때는 같은 업로드 인증서와 Play Console의 최신 versionCode보다 큰 번호를 사용해야 합니다.
+릴리스 AAB는 `app/build/outputs/bundle/release/app-release.aab`에 생성됩니다. 앱 ID는 `com.bboysilver.lifelink`, 현재 버전은 `2.3.12 (50)`입니다. 버전 번호만으로 공개 출시 승인이나 실기기 검증 완료를 뜻하지 않으며, 실제 제출 상태는 [배포 기록](docs/deployment-2.3.12.md)으로 확인합니다. 기존 Play 앱에 올릴 때는 같은 업로드 인증서와 Play Console의 최신 versionCode보다 큰 번호를 사용해야 합니다.
 
 최근 검토 결과와 정책·출시 조건은 [2026-10-03 검토](docs/review-2026-10-03.md)를 참고하세요.
 2.3.0 추가 기능과 베타 확인 항목은 [추가 기능 명세](docs/features-2.3.0.md)를 참고하세요.

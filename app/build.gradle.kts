@@ -31,8 +31,8 @@ android {
     // Keep the tested behavior contract; raising target API needs separate device validation.
     //noinspection OldTargetApi
     targetSdk = 36
-    versionCode = 49
-    versionName = "2.3.11"
+    versionCode = 50
+    versionName = "2.3.12"
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
   }
 
